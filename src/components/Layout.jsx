@@ -6,6 +6,7 @@ const NAV = [
   { to: '/',          label: 'Canchas',    icon: '⬡' },
   { to: '/calendario',label: 'Calendario', icon: '◫' },
   { to: '/ventas',    label: 'Ventas',     icon: '◈', adminOnly: true },
+  { to: '/tours', label: 'Tours', icon: '🏓', adminOnly: true },
 ]
 
 export default function Layout() {
