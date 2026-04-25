@@ -5,7 +5,7 @@ import Login from './pages/Login'
 import Courts from './pages/Courts'
 import Calendar from './pages/Calendar'
 import Ventas from './pages/Ventas'
-
+import Tours from './pages/Tours'
 function ProtectedRoute({ children, adminOnly = false }) {
   const { user, profile, loading } = useAuth()
   if (loading) return (
@@ -32,6 +32,9 @@ export default function App() {
             <Route index element={<Courts />} />
             <Route path="calendario" element={<Calendar />} />
             <Route path="ventas" element={
+              <Route path="tours" element={
+  <ProtectedRoute adminOnly><Tours /></ProtectedRoute>
+} />
               <ProtectedRoute adminOnly><Ventas /></ProtectedRoute>
             } />
           </Route>
