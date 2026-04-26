@@ -89,20 +89,49 @@ export default function Tours() {
 
   async function createManagement() {
     if (!mgmtForm.email || !mgmtForm.fullName || !mgmtForm.password) return setMgmtError('Todos los campos son requeridos')
+    if (mgmtForm.password.length < 6) return setMgmtError('La contraseña debe tener al menos 6 caracteres')
     setSavingMgmt(true)
     setMgmtError('')
-    const { data, error } = await supabase.auth.signUp({ email: mgmtForm.email, password: mgmtForm.password })
-    if (error) { setMgmtError(error.message); setSavingMgmt(false); return }
-    if (data?.user) {
+
+    // Use Supabase Admin API via service role to avoid signing out current user
+    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+    const SERVICE_KEY  = import.meta.env.VITE_SUPABASE_SERVICE_KEY
+
+    try {
+      // Create auth user without affecting current session
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SERVICE_KEY,
+          'Authorization': `Bearer ${SERVICE_KEY}`,
+        },
+        body: JSON.stringify({
+          email: mgmtForm.email,
+          password: mgmtForm.password,
+          email_confirm: true,
+        }),
+      })
+      const newUser = await res.json()
+      if (!res.ok) {
+        setMgmtError(newUser.msg || newUser.message || 'Error al crear usuario')
+        setSavingMgmt(false)
+        return
+      }
+      // Insert profile
       await supabase.from('profiles').upsert({
-        id: data.user.id, email: mgmtForm.email,
-        full_name: mgmtForm.fullName, role: 'management',
+        id: newUser.id,
+        email: mgmtForm.email,
+        full_name: mgmtForm.fullName,
+        role: 'management',
         commission_per_booking: 500,
       })
-      notify(`Management ${mgmtForm.fullName} creado exitosamente`)
+      notify(`✅ Management ${mgmtForm.fullName} creado exitosamente`)
       setMgmtForm({ email: '', fullName: '', password: '' })
       setShowMgmtForm(false)
       loadAll()
+    } catch (e) {
+      setMgmtError('Error de conexión: ' + e.message)
     }
     setSavingMgmt(false)
   }
