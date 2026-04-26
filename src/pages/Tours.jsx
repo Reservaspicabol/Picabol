@@ -110,6 +110,10 @@ export default function Tours() {
           email: mgmtForm.email,
           password: mgmtForm.password,
           email_confirm: true,
+          user_metadata: {
+            full_name: mgmtForm.fullName,
+            role: 'management',
+          },
         }),
       })
       const newUser = await res.json()
