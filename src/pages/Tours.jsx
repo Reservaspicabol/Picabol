@@ -118,14 +118,24 @@ export default function Tours() {
         setSavingMgmt(false)
         return
       }
-      // Insert profile
-      await supabase.from('profiles').upsert({
-        id: newUser.id,
-        email: mgmtForm.email,
+      // Wait for Supabase to auto-create the profile row
+      await new Promise(r => setTimeout(r, 1500))
+      // Update the auto-created profile
+      const { error: upErr } = await supabase.from('profiles').update({
         full_name: mgmtForm.fullName,
         role: 'management',
         commission_per_booking: 500,
-      })
+      }).eq('id', newUser.id)
+      // Fallback: insert if profile wasn't auto-created
+      if (upErr) {
+        await supabase.from('profiles').insert({
+          id: newUser.id,
+          email: mgmtForm.email,
+          full_name: mgmtForm.fullName,
+          role: 'management',
+          commission_per_booking: 500,
+        })
+      }
       notify(`✅ Management ${mgmtForm.fullName} creado exitosamente`)
       setMgmtForm({ email: '', fullName: '', password: '' })
       setShowMgmtForm(false)
