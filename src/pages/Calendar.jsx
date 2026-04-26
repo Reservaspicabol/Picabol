@@ -7,13 +7,16 @@ import {
   getWeekDays, ymd, todayStr, isSlotBlocked, fmtMXN
 } from '../lib/utils'
 
+const TOUR_HOURS = 3
+
 export default function Calendar() {
   const { profile } = useAuth()
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedDay, setSelectedDay] = useState(todayStr())
   const [courtFilter, setCourtFilter] = useState(0)
   const [bookings, setBookings] = useState([])
-  const [modal, setModal] = useState(null)   // { hour, court }
+  const [tourBookings, setTourBookings] = useState([])
+  const [modal, setModal] = useState(null)
   const [form, setForm] = useState({ name:'', city:'', modality:'privada', people:2, notes:'' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -24,16 +27,36 @@ export default function Calendar() {
   useEffect(() => {
     const from = ymd(days[0])
     const to   = ymd(days[6])
-    fetchBookingsRange(from, to).then(({ data }) => setBookings(data))
 
-    // realtime for whole week
-    const channel = supabase.channel('cal-week')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => {
-        fetchBookingsRange(from, to).then(({ data }) => setBookings(data))
-      })
+    function loadAll() {
+      fetchBookingsRange(from, to).then(({ data }) => setBookings(data || []))
+      supabase.from('tour_bookings')
+        .select('*')
+        .gte('date', from)
+        .lte('date', to)
+        .neq('status', 'cancelled')
+        .then(({ data }) => setTourBookings(data || []))
+    }
+
+    loadAll()
+
+    const channel = supabase.channel('cal-week-full')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tour_bookings' }, loadAll)
       .subscribe()
     return () => supabase.removeChannel(channel)
   }, [weekOffset])
+
+  // Normalize tour bookings to look like regular bookings for slot blocking
+  const tourBookingsNormalized = tourBookings.map(tb => ({
+    ...tb,
+    modality: 'tour',
+    name: `🏓 Tour: ${tb.client_name}`,
+    people: 1,
+  }))
+
+  // All bookings combined for slot blocking
+  const allBookings = [...bookings, ...tourBookingsNormalized]
 
   const weekLabel = (() => {
     const f = days[0], l = days[6]
@@ -43,12 +66,27 @@ export default function Calendar() {
   const visibleCourts = courtFilter === 0 ? COURTS : [courtFilter]
   const today = todayStr()
 
+  function isSlotBlockedAll(date, court, hour) {
+    // Check regular bookings
+    for (const b of bookings) {
+      if (b.date !== date || b.court !== court) continue
+      const slots = b.modality === 'openplay' ? OPENPLAY_HOURS : 1
+      if (hour >= b.hour && hour < b.hour + slots) return { ...b, type: 'booking' }
+    }
+    // Check tour bookings
+    for (const b of tourBookings) {
+      if (b.date !== date || b.court !== court) continue
+      if (hour >= b.hour && hour < b.hour + TOUR_HOURS) return { ...b, type: 'tour', name: b.client_name, modality: 'tour' }
+    }
+    return null
+  }
+
   async function saveBooking() {
     if (!form.name.trim()) return setError('Ingresa el nombre')
     const { hour, court } = modal
     const slots = form.modality === 'openplay' ? OPENPLAY_HOURS : 1
     for (let i = 0; i < slots; i++) {
-      if (isSlotBlocked(bookings, selectedDay, court, hour + i)) {
+      if (isSlotBlockedAll(selectedDay, court, hour + i)) {
         return setError(`Conflicto en Cancha ${court} a las ${hour + i}:00`)
       }
     }
@@ -84,8 +122,8 @@ export default function Calendar() {
     setNotif(`Eliminada — ${b?.name}`)
   }
 
-  // Day summary
   const dayBookings = bookings.filter(b => b.date === selectedDay)
+  const dayTours    = tourBookings.filter(b => b.date === selectedDay)
   const dayRevenue  = dayBookings.reduce((a, b) => a + Number(b.revenue || 0), 0)
 
   return (
@@ -115,7 +153,7 @@ export default function Calendar() {
       <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
         {days.map(d => {
           const ds = ymd(d)
-          const count = bookings.filter(b => b.date === ds).length
+          const count = bookings.filter(b => b.date === ds).length + tourBookings.filter(b => b.date === ds).length
           const isToday = ds === today
           const isActive = ds === selectedDay
           return (
@@ -160,6 +198,7 @@ export default function Calendar() {
         {[
           { bg: '#1a2e0d', border: 'var(--gd)', label: 'Cancha privada' },
           { bg: '#0d1e35', border: '#1e4a8a',   label: 'Open Play (3 h)' },
+          { bg: '#2e1a0d', border: '#8a4a1e',   label: 'Dink & Drink Tour' },
           { bg: 'var(--sf)', border: 'var(--br)', label: 'Disponible' },
         ].map(l => (
           <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--mt)' }}>
@@ -190,10 +229,43 @@ export default function Calendar() {
               </div>
               <div style={{ flex: 1, display: 'grid', gridTemplateColumns: `repeat(${visibleCourts.length}, 1fr)`, gap: 3 }}>
                 {visibleCourts.map(court => {
-                  const booking = bookings.find(b => b.date === selectedDay && b.court === court && b.hour === h)
-                  const blocker = !booking ? isSlotBlocked(bookings, selectedDay, court, h) : null
-                  const isOPContinuation = blocker && blocker.mod === 'openplay' && blocker.hour !== h
+                  const booking    = bookings.find(b => b.date === selectedDay && b.court === court && b.hour === h)
+                  const tourBooking = tourBookings.find(b => b.date === selectedDay && b.court === court && b.hour === h)
+                  const blocker    = !booking && !tourBooking ? isSlotBlockedAll(selectedDay, court, h) : null
+                  const isOPContinuation = blocker && blocker.modality === 'openplay' && blocker.hour !== h
+                  const isTourContinuation = blocker && blocker.type === 'tour' && blocker.hour !== h
 
+                  // Tour booking start
+                  if (tourBooking) {
+                    return (
+                      <div key={court} style={{
+                        background: '#2e1a0d', border: '1px solid #8a4a1e',
+                        borderRadius: '5px 5px 0 0', borderBottom: 'none',
+                        padding: '4px 6px', position: 'relative', overflow: 'hidden',
+                      }}>
+                        <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: '#e8a87c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          🏓 {tourBooking.client_name}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--mt)' }}>
+                          {tourBooking.package} · {tourBooking.hotel?.substring(0, 15)}
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  // Tour continuation
+                  if (isTourContinuation) {
+                    const isLast = h === blocker.hour + TOUR_HOURS - 1
+                    return (
+                      <div key={court} style={{
+                        background: '#2e1a0d', border: '1px solid #8a4a1e',
+                        borderTop: 'none', borderRadius: isLast ? '0 0 5px 5px' : 0,
+                        borderBottom: isLast ? undefined : 'none', minHeight: 36
+                      }} />
+                    )
+                  }
+
+                  // Regular booking
                   if (booking) {
                     const isOP = booking.modality === 'openplay'
                     return (
@@ -220,22 +292,23 @@ export default function Calendar() {
                       </div>
                     )
                   }
+
+                  // Open play continuation
                   if (isOPContinuation) {
                     const isLast = h === blocker.hour + OPENPLAY_HOURS - 1
                     return (
                       <div key={court} style={{
-                        background: '#0d1e35',
-                        border: '1px solid #1e4a8a',
-                        borderTop: 'none',
-                        borderRadius: isLast ? '0 0 5px 5px' : 0,
-                        borderBottom: isLast ? undefined : 'none',
-                        minHeight: 36
+                        background: '#0d1e35', border: '1px solid #1e4a8a',
+                        borderTop: 'none', borderRadius: isLast ? '0 0 5px 5px' : 0,
+                        borderBottom: isLast ? undefined : 'none', minHeight: 36
                       }} />
                     )
                   }
+
                   if (isPastHour) {
                     return <div key={court} style={{ background: '#1e1e1e', border: '1px solid #2a2a2a', borderRadius: 5, opacity: .4, minHeight: 36 }} />
                   }
+
                   return (
                     <div key={court}
                       onClick={() => { setModal({ hour: h, court }); setForm({ name:'', city:'', modality:'privada', people:2, notes:'' }); setError('') }}
@@ -301,9 +374,10 @@ export default function Calendar() {
       {/* Day summary */}
       <div className="card" style={{ marginTop: 12, display: 'flex', gap: 20, flexWrap: 'wrap' }}>
         {[
-          { label: 'RESERVAS', val: dayBookings.length },
+          { label: 'RESERVAS', val: dayBookings.length + dayTours.length },
           { label: 'PRIVADAS', val: dayBookings.filter(b => b.modality === 'privada').length },
           { label: 'OPEN PLAY', val: dayBookings.filter(b => b.modality === 'openplay').length },
+          { label: 'TOURS D&D', val: dayTours.length },
           { label: 'PERSONAS EST.', val: dayBookings.reduce((a, b) => a + (b.people||0), 0) },
           { label: 'INGRESO EST.', val: fmtMXN(dayRevenue) },
         ].map(s => (
