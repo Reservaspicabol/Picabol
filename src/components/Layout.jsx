@@ -3,10 +3,11 @@ import { useAuth } from '../hooks/useAuth'
 import { useState, useEffect } from 'react'
 
 const NAV = [
-  { to: '/',          label: 'Canchas',    icon: '⬡' },
-  { to: '/calendario',label: 'Calendario', icon: '◫' },
-  { to: '/ventas',    label: 'Ventas',     icon: '◈', adminOnly: true },
-  { to: '/tours', label: 'Tours', icon: '🏓', adminOnly: true },
+  { to: '/',           label: 'Canchas',    icon: '⬡' },
+  { to: '/calendario', label: 'Calendario', icon: '◫' },
+  { to: '/ventas',     label: 'Ventas',     icon: '◈', adminOnly: true },
+  { to: '/drills',     label: 'Drills',     icon: '🎯', adminOnly: true },
+  { to: '/tours',      label: 'Tours',      icon: '🏓', adminOnly: true },
 ]
 
 export default function Layout() {
@@ -43,7 +44,6 @@ export default function Layout() {
             {profile?.role === 'admin' ? 'Administrador' : profile?.role === 'host' ? 'Host' : '...'}
           </div>
         </div>
-
         {/* Clock */}
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--br)' }}>
           <div style={{
@@ -51,7 +51,6 @@ export default function Layout() {
             color: 'var(--mt)', letterSpacing: 1
           }}>{time}</div>
         </div>
-
         {/* Nav */}
         <nav style={{ flex: 1, padding: '10px 8px' }}>
           {NAV.filter(n => !n.adminOnly || profile?.role === 'admin').map(item => (
@@ -74,7 +73,6 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
-
         {/* User / signout */}
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--br)' }}>
           <div style={{ fontSize: 12, color: 'var(--mt)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -89,7 +87,6 @@ export default function Layout() {
           </button>
         </div>
       </aside>
-
       {/* Main content */}
       <main style={{ flex: 1, overflow: 'auto', padding: 16 }}>
         <Outlet />
