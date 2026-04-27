@@ -68,23 +68,26 @@ export default function Tours() {
   }
 
   async function updateBookingStatus(id, status) {
-    await supabase.from('tour_bookings').update({ status }).eq('id', id)
-    if (status === 'cancelled') {
-      // Pay cancellation commissions
-      const comm = commissions.find(c => c.tour_booking_id === id)
-      if (comm) {
-        await supabase.from('commissions').update({
-          vendor_amount: 50,
-          manager_amount: 25,
-          status: 'cancelled_partial'
-        }).eq('tour_booking_id', id)
-      }
-      notify('Reserva cancelada — comisiones de cancelación aplicadas ($50 vendedor / $25 management)')
-    } else if (status === 'confirmed') {
-      await supabase.from('commissions').update({ status: 'confirmed' }).eq('tour_booking_id', id)
-      notify('✅ Check-in confirmado')
+  await supabase.from('tour_bookings').update({ status }).eq('id', id)
+  if (status === 'cancelled') {
+    const comm = commissions.find(c => c.tour_booking_id === id)
+    if (comm) {
+      await supabase.from('commissions').update({
+        vendor_amount: 50,
+        manager_amount: 25,
+        status: 'cancelled_partial'
+      }).eq('tour_booking_id', id)
     }
-    loadAll()
+    notify('Reserva cancelada — comisiones de cancelación aplicadas ($50 vendedor / $25 management)')
+  } else if (status === 'confirmed') {
+    await supabase.from('commissions').update({ status: 'confirmed' }).eq('tour_booking_id', id)
+    notify('✅ Check-in confirmado')
+  }
+  // Update local state immediately
+  setBookings(prev => prev.map(b => b.id === id ? { ...b, status } : b))
+  // Also reload from DB to sync everything
+  loadAll()
+}
   }
 
   async function createManagement() {
