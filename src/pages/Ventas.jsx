@@ -165,10 +165,10 @@ export default function Ventas() {
       b.total_mxn || 0, 0, b.total_mxn || 0, b.status || '—'
     ])
 
-    const header = ['Fecha','Hora','Cliente','Teléfono','Hotel/Ciudad','Tipo','Cancha','Personas','Total MXN','Depósito MXN','Balance MXN','Status']
-    const allRows = [...courtRows, ...tourRows, ...drillRows].sort((a,b) => a[0]?.localeCompare(b[0]))
-    const header = ['Fecha','Hora','Cliente','Telefono','Hotel/Ciudad','Tipo','Cancha','Personas','Total MXN','Deposito MXN','Balance MXN','Status']
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const csvHeader = ['Fecha','Hora','Cliente','Telefono','Hotel/Ciudad','Tipo','Cancha','Personas','Total MXN','Deposito MXN','Balance MXN','Status']
+    const csvRows = [...courtRows, ...tourRows, ...drillRows].sort((a,b) => String(a[0]).localeCompare(String(b[0])))
+    const csv = [csvHeader, ...csvRows].map(r => r.map(v => '"' + String(v||'') + '"').join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
