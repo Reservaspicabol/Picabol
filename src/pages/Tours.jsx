@@ -201,8 +201,7 @@ export default function Tours() {
       'Total MXN','Total USD','Depósito MXN','Depósito USD','Balance MXN',
       'Vendedor','Comisión Vendedor','Comisión Management','Status Comisión']
 
-    const csv = [header, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('
-')
+    const csv = [header, ...rows].map(r => r.map(v => '"' + v + '"').join(',')).join('\n')
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
