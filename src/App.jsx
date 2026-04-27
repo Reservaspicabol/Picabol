@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Courts from './pages/Courts'
 import Calendar from './pages/Calendar'
 import Ventas from './pages/Ventas'
+import Drills from './pages/Drills'
 import Tours from './pages/Tours'
 
 function ProtectedRoute({ children, adminOnly = false }) {
@@ -34,6 +35,9 @@ export default function App() {
             <Route path="calendario" element={<Calendar />} />
             <Route path="ventas" element={
               <ProtectedRoute adminOnly><Ventas /></ProtectedRoute>
+            } />
+            <Route path="drills" element={
+              <ProtectedRoute adminOnly><Drills /></ProtectedRoute>
             } />
             <Route path="tours" element={
               <ProtectedRoute adminOnly><Tours /></ProtectedRoute>
