@@ -14,6 +14,7 @@ export default function Ventas() {
   const [period,       setPeriod]       = useState('semana')
   const [bookings,     setBookings]     = useState([])
   const [tourBookings, setTourBookings] = useState([])
+  const [drillBookings, setDrillBookings] = useState([])
   const [loading,      setLoading]      = useState(true)
 
   useEffect(() => { loadData() }, [period])
@@ -34,12 +35,14 @@ export default function Ventas() {
       to   = format(endOfMonth(today),   'yyyy-MM-dd')
     }
 
-    const [b, t] = await Promise.all([
+    const [b, t, d] = await Promise.all([
       fetchBookingsRange(from, to),
       supabase.from('tour_bookings').select('*').gte('date', from).lte('date', to).neq('status', 'cancelled'),
+      supabase.from('drills').select('*').gte('date', from).lte('date', to).neq('status', 'cancelled'),
     ])
     setBookings(b.data || [])
     setTourBookings(t.data || [])
+    setDrillBookings(d.data || [])
     setLoading(false)
   }
 
@@ -61,13 +64,19 @@ export default function Ventas() {
     return a + base + (b.extra_pax || 0)
   }, 0)
 
+  // ── Drill stats ───────────────────────────────────────────────────────
+  const drillRevMXN = drillBookings.reduce((a, b) => a + Number(b.total_mxn || 0), 0)
+  const confirmedDrills = drillBookings.filter(b => b.status === 'confirmed')
+  const privateDrills = drillBookings.filter(b => b.type === 'private')
+  const collectiveDrills = drillBookings.filter(b => b.type === 'collective')
+
   // ── Combined ──────────────────────────────────────────────────────────
-  const totalRev  = courtRev + tourRevMXN
+  const totalRev  = courtRev + tourRevMXN + drillRevMXN
   const totalPpl  = finished.reduce((a, b) => a + (b.people || 0), 0) + tourPeople
   const gH        = finished.reduce((a, b) => a + (b.gender_m || 0), 0)
   const gF        = finished.reduce((a, b) => a + (b.gender_f || 0), 0)
   const gK        = finished.reduce((a, b) => a + (b.gender_k || 0), 0)
-  const totalRes  = finished.length + tourBookings.length
+  const totalRes  = finished.length + tourBookings.length + drillBookings.length
   const avgTicket = totalRes ? Math.round(totalRev / totalRes) : 0
 
   // By day of week
@@ -76,12 +85,14 @@ export default function Ventas() {
     const ds      = ymd(d)
     const dayB    = finished.filter(b => b.date === ds)
     const dayT    = tourBookings.filter(b => b.date === ds)
+    const dayD    = drillBookings.filter(b => b.date === ds)
     const courtR  = dayB.reduce((a, b) => a + Number(b.revenue || 0), 0)
     const tourR   = dayT.reduce((a, b) => a + Number(b.total_mxn || 0), 0)
+    const drillR  = dayD.reduce((a, b) => a + Number(b.total_mxn || 0), 0)
     return {
       label: DAYS_ES[d.getDay()],
-      rev: courtR + tourR, courtRev: courtR, tourRev: tourR,
-      count: dayB.length + dayT.length,
+      rev: courtR + tourR + drillR, courtRev: courtR, tourRev: tourR, drillRev: drillR,
+      count: dayB.length + dayT.length + dayD.length,
       isToday: ds === format(new Date(), 'yyyy-MM-dd')
     }
   })
@@ -91,6 +102,7 @@ export default function Ventas() {
   const hourCounts = Array(15).fill(0)
   finished.forEach(b => { if (b.hour >= 7 && b.hour <= 21) hourCounts[b.hour - 7]++ })
   tourBookings.forEach(b => { if (b.hour >= 7 && b.hour <= 21) hourCounts[b.hour - 7]++ })
+  drillBookings.forEach(b => { if (b.hour >= 7 && b.hour <= 21) hourCounts[b.hour - 7]++ })
   const maxHour = Math.max(...hourCounts, 1)
 
   // By city
@@ -108,18 +120,20 @@ export default function Ventas() {
   const privPct  = totalRev > 0 ? privRev / totalRev : 0
   const openPct  = totalRev > 0 ? openRev / totalRev : 0
   const tourPct  = totalRev > 0 ? tourRevMXN / totalRev : 0
+  const drillPct = totalRev > 0 ? drillRevMXN / totalRev : 0
   const privDash = privPct * circ
   const openDash = openPct * circ
-  const tourDash = tourPct * circ
+  const tourDash  = tourPct * circ
+  const drillDash = drillPct * circ
 
   const kpis = [
     {
       label: 'INGRESOS TOTALES', val: fmtMXN(totalRev), accent: 'var(--g)',
-      sub: `Canchas: ${fmtMXN(courtRev)} · Tours: ${fmtMXN(tourRevMXN)}`
+      sub: `Canchas: ${fmtMXN(courtRev)} · Tours: ${fmtMXN(tourRevMXN)} · Drills: ${fmtMXN(drillRevMXN)}`
     },
     {
       label: 'RESERVAS TOTALES', val: totalRes, accent: 'var(--bl)',
-      sub: `Canchas: ${finished.length} · Tours: ${tourBookings.length}`
+      sub: `Canchas: ${finished.length} · Tours: ${tourBookings.length} · Drills: ${drillBookings.length}`
     },
     {
       label: 'PERSONAS', val: totalPpl, accent: 'var(--tl)',
@@ -193,6 +207,31 @@ export default function Ventas() {
         </div>
       )}
 
+      {/* Drills summary strip */}
+      {drillBookings.length > 0 && (
+        <div style={{
+          background: '#1a1535', border: '1px solid #6b3fa0',
+          borderRadius: 8, padding: '10px 16px', marginBottom: 10,
+          display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center'
+        }}>
+          <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 700, color: '#c8a8f0', letterSpacing: '.05em' }}>
+            🎯 DRILLS
+          </div>
+          {[
+            { label: 'Total', val: drillBookings.length },
+            { label: 'Confirmados', val: confirmedDrills.length },
+            { label: 'Privados', val: privateDrills.length },
+            { label: 'Colectivos', val: collectiveDrills.length },
+            { label: 'Ingreso Est.', val: fmtMXN(drillRevMXN) },
+          ].map(s => (
+            <div key={s.label}>
+              <div style={{ fontSize: 9, color: 'var(--mt)', letterSpacing: '.06em' }}>{s.label}</div>
+              <div style={{ fontFamily: 'var(--font-cond)', fontSize: 18, fontWeight: 700, color: '#c8a8f0' }}>{s.val}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Main row: bar chart + donut */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10, marginBottom: 10 }}>
         <div className="card">
@@ -215,6 +254,9 @@ export default function Ventas() {
                       {d.tourRev > 0 && (
                         <div style={{ height: `${hTour}px`, minHeight: 3, background: '#c8e86b', width: '100%' }} />
                       )}
+                      {d.drillRev > 0 && (
+                        <div style={{ height: `${Math.round(d.drillRev / maxDayRev * 100)}px`, minHeight: 3, background: '#9b59b6', width: '100%' }} />
+                      )}
                       {d.courtRev > 0 && (
                         <div style={{ height: `${hCourt}px`, minHeight: 3, background: d.isToday ? 'var(--g)' : '#3d6b18', width: '100%' }} />
                       )}
@@ -236,6 +278,9 @@ export default function Ventas() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--mt)' }}>
               <div style={{ width: 8, height: 8, borderRadius: 2, background: '#c8e86b' }} /> Tours D&D
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--mt)' }}>
+              <div style={{ width: 8, height: 8, borderRadius: 2, background: '#9b59b6' }} /> Drills
+            </div>
           </div>
         </div>
 
@@ -253,6 +298,8 @@ export default function Ventas() {
                   strokeDasharray={`${openDash} ${circ}`} strokeDashoffset={circ * 0.25 - privDash} />
                 <circle cx={cx} cy={cx} r={r} fill="none" stroke="#c8e86b" strokeWidth="12"
                   strokeDasharray={`${tourDash} ${circ}`} strokeDashoffset={circ * 0.25 - privDash - openDash} />
+                <circle cx={cx} cy={cx} r={r} fill="none" stroke="#9b59b6" strokeWidth="12"
+                  strokeDasharray={`${drillDash} ${circ}`} strokeDashoffset={circ * 0.25 - privDash - openDash - tourDash} />
               </svg>
               <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', textAlign: 'center' }}>
                 <div style={{ fontFamily: 'var(--font-cond)', fontSize: 18, fontWeight: 800 }}>{fmtMXN(totalRev)}</div>
@@ -262,7 +309,8 @@ export default function Ventas() {
             {[
               { color: 'var(--g)',  label: 'Cancha privada', val: fmtMXN(privRev),    pct: Math.round(privPct*100), count: privadas.length },
               { color: 'var(--bl)', label: 'Open Play',      val: fmtMXN(openRev),    pct: Math.round(openPct*100), count: opens.length },
-              { color: '#c8e86b',   label: 'Dink & Drink',   val: fmtMXN(tourRevMXN), pct: Math.round(tourPct*100), count: tourBookings.length },
+              { color: '#c8e86b',   label: 'Dink & Drink',   val: fmtMXN(tourRevMXN),  pct: Math.round(tourPct*100),  count: tourBookings.length },
+              { color: '#9b59b6',   label: 'Drills',         val: fmtMXN(drillRevMXN), pct: Math.round(drillPct*100), count: drillBookings.length },
             ].map(m => (
               <div key={m.label} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid var(--br)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
@@ -370,7 +418,8 @@ export default function Ventas() {
             <tbody>
               {[
                 ...finished.map(b => ({ ...b, _type: 'court' })),
-                ...tourBookings.map(b => ({ ...b, _type: 'tour', name: b.client_name, revenue: b.total_mxn, people: (parseInt(b.package)||2) + (b.extra_pax||0), city: b.hotel }))
+                ...tourBookings.map(b => ({ ...b, _type: 'tour', name: b.client_name, revenue: b.total_mxn, people: (parseInt(b.package)||2) + (b.extra_pax||0), city: b.hotel })),
+              ...drillBookings.map(b => ({ ...b, _type: 'drill', name: b.client_name, revenue: b.total_mxn, people: b.people || 1, city: b.notes || '—', modality: b.type }))
               ]
                 .sort((a, b) => b.date?.localeCompare(a.date))
                 .slice(0, 20)
@@ -386,15 +435,15 @@ export default function Ventas() {
                       <span style={{
                         display: 'inline-block', fontFamily: 'var(--font-cond)', fontSize: 11, fontWeight: 600,
                         padding: '2px 8px', borderRadius: 4,
-                        background: b._type === 'tour' ? '#1a2e10' : b.modality === 'privada' ? 'var(--glight)' : '#0d1e35',
-                        color: b._type === 'tour' ? '#c8e86b' : b.modality === 'privada' ? 'var(--g)' : 'var(--bl)'
+                        background: b._type === 'drill' ? '#1e1535' : b._type === 'tour' ? '#1a2e10' : b.modality === 'privada' ? 'var(--glight)' : '#0d1e35',
+                        color: b._type === 'drill' ? '#c8a8f0' : b._type === 'tour' ? '#c8e86b' : b.modality === 'privada' ? 'var(--g)' : 'var(--bl)'
                       }}>
-                        {b._type === 'tour' ? `Tour ${b.package}` : b.modality === 'privada' ? 'Privada' : 'Open Play'}
+                        {b._type === 'drill' ? `Drill ${b.modality}` : b._type === 'tour' ? `Tour ${b.package}` : b.modality === 'privada' ? 'Privada' : 'Open Play'}
                       </span>
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--mt)', padding: '7px 6px', borderTop: '1px solid var(--br)' }}>{b.people}p</td>
                     <td style={{ fontSize: 12, color: 'var(--mt)', padding: '7px 6px', borderTop: '1px solid var(--br)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.city || '—'}</td>
-                    <td style={{ fontFamily: 'var(--font-cond)', fontSize: 14, fontWeight: 700, color: b._type === 'tour' ? '#c8e86b' : 'var(--g)', padding: '7px 6px', borderTop: '1px solid var(--br)' }}>
+                    <td style={{ fontFamily: 'var(--font-cond)', fontSize: 14, fontWeight: 700, color: b._type === 'drill' ? '#c8a8f0' : b._type === 'tour' ? '#c8e86b' : 'var(--g)', padding: '7px 6px', borderTop: '1px solid var(--br)' }}>
                       {fmtMXN(b.revenue)}
                     </td>
                   </tr>
