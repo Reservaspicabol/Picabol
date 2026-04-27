@@ -16,8 +16,10 @@ export default function Calendar() {
   const [courtFilter, setCourtFilter] = useState(0)
   const [bookings, setBookings] = useState([])
   const [tourBookings, setTourBookings] = useState([])
+  const [drillBookings, setDrillBookings] = useState([])
   const [modal, setModal] = useState(null)
-  const [form, setForm] = useState({ name:'', city:'', modality:'privada', people:2, notes:'' })
+  const [form, setForm] = useState({ name:'', city:'', modality:'privada', people:2, notes:'', duration:1 })
+  const [extendModal, setExtendModal] = useState(null) // booking to extend
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [notif, setNotif] = useState('')
@@ -67,16 +69,18 @@ export default function Calendar() {
   const today = todayStr()
 
   function isSlotBlockedAll(date, court, hour) {
-    // Check regular bookings
     for (const b of bookings) {
       if (b.date !== date || b.court !== court) continue
-      const slots = b.modality === 'openplay' ? OPENPLAY_HOURS : 1
+      const slots = b.modality === 'openplay' ? OPENPLAY_HOURS : (b.duration || 1)
       if (hour >= b.hour && hour < b.hour + slots) return { ...b, type: 'booking' }
     }
-    // Check tour bookings
     for (const b of tourBookings) {
       if (b.date !== date || b.court !== court) continue
       if (hour >= b.hour && hour < b.hour + TOUR_HOURS) return { ...b, type: 'tour', name: b.client_name, modality: 'tour' }
+    }
+    for (const b of drillBookings) {
+      if (b.date !== date || b.court !== court) continue
+      if (hour >= b.hour && hour < b.hour + 1) return { ...b, type: 'drill', name: b.client_name, modality: 'drill' }
     }
     return null
   }
@@ -94,10 +98,14 @@ export default function Calendar() {
       return setError('Open Play excede el horario de cierre (21:00)')
     }
     setSaving(true)
-    const revenue = form.modality === 'privada' ? 400 : 200 * form.people
+    const duration = form.modality === 'privada' ? (form.duration || 1) : OPENPLAY_HOURS
+    const revenue = form.modality === 'privada'
+      ? (duration === 2 ? 750 : 400 * duration)
+      : 200 * form.people
     const { data, error } = await supabase.from('bookings').insert({
       date: selectedDay, hour, court,
       modality: form.modality,
+      duration: form.modality === 'privada' ? (form.duration || 1) : OPENPLAY_HOURS,
       name: form.name.trim(),
       city: form.city.trim() || null,
       people: form.people,
@@ -199,6 +207,7 @@ export default function Calendar() {
           { bg: '#1a2e0d', border: 'var(--gd)', label: 'Cancha privada' },
           { bg: '#0d1e35', border: '#1e4a8a',   label: 'Open Play (3 h)' },
           { bg: '#2e1a0d', border: '#8a4a1e',   label: 'Dink & Drink Tour' },
+          { bg: '#1e1535', border: '#6b3fa0',   label: 'Drill / Clase' },
           { bg: 'var(--sf)', border: 'var(--br)', label: 'Disponible' },
         ].map(l => (
           <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--mt)' }}>
@@ -248,6 +257,24 @@ export default function Calendar() {
                         </div>
                         <div style={{ fontSize: 10, color: 'var(--mt)' }}>
                           {tourBooking.package} · {tourBooking.hotel?.substring(0, 15)}
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  // Drill booking
+                  const drillBooking = drillBookings.find(b => b.date === selectedDay && b.court === court && b.hour === h)
+                  if (drillBooking) {
+                    return (
+                      <div key={court} style={{
+                        background: '#1e1535', border: '1px solid #6b3fa0',
+                        borderRadius: 5, padding: '4px 6px', overflow: 'hidden',
+                      }}>
+                        <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: '#c8a8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          🎯 {drillBooking.client_name}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--mt)' }}>
+                          {drillBooking.type === 'private' ? 'Privado' : 'Colectivo'}
                         </div>
                       </div>
                     )
@@ -344,7 +371,7 @@ export default function Calendar() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
             <div>
               <label className="form-label">Modalidad</label>
-              <select className="form-select" value={form.modality} onChange={e => setForm(f => ({...f, modality: e.target.value}))}>
+              <select className="form-select" value={form.modality} onChange={e => setForm(f => ({...f, modality: e.target.value, duration: 1}))}>
                 <option value="privada">Cancha privada · $400 · 1 hora</option>
                 <option value="openplay">Open Play · $200/p · 3 horas</option>
               </select>
@@ -354,6 +381,22 @@ export default function Calendar() {
               <input className="form-input" type="number" min="1" max="12" value={form.people} onChange={e => setForm(f => ({...f, people: +e.target.value}))} />
             </div>
           </div>
+          {form.modality === 'privada' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+              <div>
+                <label className="form-label">Duración</label>
+                <select className="form-select" value={form.duration} onChange={e => setForm(f => ({...f, duration: +e.target.value}))}>
+                  <option value={1}>1 hora · $400</option>
+                  <option value={2}>2 horas · $750 (ahorro $50)</option>
+                </select>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 4 }}>
+                <div style={{ fontSize: 12, color: 'var(--g)', fontWeight: 600 }}>
+                  Total: ${form.duration === 2 ? '750' : '400'} MXN
+                </div>
+              </div>
+            </div>
+          )}
           <div style={{ marginBottom: 10 }}>
             <label className="form-label">Notas</label>
             <input className="form-input" value={form.notes} onChange={e => setForm(f => ({...f, notes: e.target.value}))} placeholder="Cumpleaños, grupo especial..." />
@@ -378,6 +421,7 @@ export default function Calendar() {
           { label: 'PRIVADAS', val: dayBookings.filter(b => b.modality === 'privada').length },
           { label: 'OPEN PLAY', val: dayBookings.filter(b => b.modality === 'openplay').length },
           { label: 'TOURS D&D', val: dayTours.length },
+          { label: 'DRILLS', val: drillBookings.filter(b => b.date === selectedDay).length },
           { label: 'PERSONAS EST.', val: dayBookings.reduce((a, b) => a + (b.people||0), 0) },
           { label: 'INGRESO EST.', val: fmtMXN(dayRevenue) },
         ].map(s => (
