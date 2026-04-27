@@ -167,8 +167,7 @@ export default function Ventas() {
 
     const header = ['Fecha','Hora','Cliente','Teléfono','Hotel/Ciudad','Tipo','Cancha','Personas','Total MXN','Depósito MXN','Balance MXN','Status']
     const allRows = [...courtRows, ...tourRows, ...drillRows].sort((a,b) => a[0]?.localeCompare(b[0]))
-    const csv = [header, ...allRows].map(r => r.map(v => '"' + v + '"').join(',')).join('
-')
+    const header = ['Fecha','Hora','Cliente','Telefono','Hotel/Ciudad','Tipo','Cancha','Personas','Total MXN','Deposito MXN','Balance MXN','Status']
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
