@@ -27,17 +27,19 @@ export default function Calendar() {
   const days = getWeekDays(weekOffset)
 
   useEffect(() => {
-    const from = ymd(days[0])
-    const to   = ymd(days[6])
+    const currentDays = getWeekDays(weekOffset)
+    const from = ymd(currentDays[0])
+    const to   = ymd(currentDays[6])
 
-    function loadAll() {
-      fetchBookingsRange(from, to).then(({ data }) => setBookings(data || []))
-      supabase.from('tour_bookings')
-        .select('*')
-        .gte('date', from)
-        .lte('date', to)
-        .neq('status', 'cancelled')
-        .then(({ data }) => setTourBookings(data || []))
+    async function loadAll() {
+      const [b, t, d] = await Promise.all([
+        fetchBookingsRange(from, to),
+        supabase.from('tour_bookings').select('*').gte('date', from).lte('date', to).neq('status', 'cancelled'),
+        supabase.from('drills').select('*').gte('date', from).lte('date', to).neq('status', 'cancelled'),
+      ])
+      setBookings(b.data || [])
+      setTourBookings(t.data || [])
+      setDrillBookings(d.data || [])
     }
 
     loadAll()
@@ -45,6 +47,7 @@ export default function Calendar() {
     const channel = supabase.channel('cal-week-full')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tour_bookings' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'drills' }, loadAll)
       .subscribe()
     return () => supabase.removeChannel(channel)
   }, [weekOffset])
