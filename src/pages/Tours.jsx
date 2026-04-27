@@ -164,6 +164,143 @@ export default function Tours() {
     setSavingInc(false)
   }
 
+  async function deleteBooking(id) {
+    if (!window.confirm('¿Eliminar esta reserva del panel? Esta acción no se puede deshacer.')) return
+    await supabase.from('commissions').delete().eq('tour_booking_id', id)
+    await supabase.from('tour_bookings').delete().eq('id', id)
+    setBookings(prev => prev.filter(b => b.id !== id))
+    notify('🗑 Reserva eliminada del panel')
+  }
+
+  function exportExcel(period) {
+    const now = new Date()
+    let filtered = bookings
+    if (period === 'week') {
+      const start = new Date(now); start.setDate(now.getDate() - now.getDay())
+      const end   = new Date(start); end.setDate(start.getDate() + 6)
+      filtered = bookings.filter(b => b.date >= start.toISOString().slice(0,10) && b.date <= end.toISOString().slice(0,10))
+    } else if (period === 'month') {
+      const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
+      filtered = bookings.filter(b => b.date?.startsWith(ym))
+    }
+
+    const rows = filtered.map(b => {
+      const comm = commissions.find(c => c.tour_booking_id === b.id)
+      const vendor = profiles.find(p => p.id === b.vendor_id)
+      return [
+        b.date, `${String(b.hour).padStart(2,'0')}:00`, b.client_name, b.client_phone,
+        b.hotel, b.package, b.court, b.pickup_time, b.status,
+        b.total_mxn, b.total_usd, b.deposit_mxn, b.deposit_usd,
+        b.total_mxn - b.deposit_mxn,
+        vendor?.full_name || '—',
+        comm?.vendor_amount || 0, comm?.manager_amount || 0, comm?.status || '—'
+      ]
+    })
+
+    const header = ['Fecha','Hora','Cliente','Teléfono','Hotel/Pickup','Paquete','Cancha','Hora Pickup','Status',
+      'Total MXN','Total USD','Depósito MXN','Depósito USD','Balance MXN',
+      'Vendedor','Comisión Vendedor','Comisión Management','Status Comisión']
+
+    const csv = [header, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('
+')
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url
+    a.download = `dink-and-drink-${period}-${now.toISOString().slice(0,10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    notify(`✅ Reporte ${period === 'week' ? 'semanal' : 'mensual'} descargado`)
+  }
+
+  function exportPDF(period) {
+    const now = new Date()
+    let filtered = bookings
+    let periodLabel = 'General'
+    if (period === 'week') {
+      const start = new Date(now); start.setDate(now.getDate() - now.getDay())
+      const end   = new Date(start); end.setDate(start.getDate() + 6)
+      filtered = bookings.filter(b => b.date >= start.toISOString().slice(0,10) && b.date <= end.toISOString().slice(0,10))
+      periodLabel = `Semana del ${start.toLocaleDateString('es-MX')} al ${end.toLocaleDateString('es-MX')}`
+    } else if (period === 'month') {
+      const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
+      filtered = bookings.filter(b => b.date?.startsWith(ym))
+      periodLabel = now.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })
+    }
+
+    const active    = filtered.filter(b => b.status !== 'cancelled')
+    const confirmed = filtered.filter(b => b.status === 'confirmed')
+    const cancelled = filtered.filter(b => b.status === 'cancelled')
+    const totalMXN  = active.reduce((s,b) => s + Number(b.total_mxn||0), 0)
+    const totalDep  = active.reduce((s,b) => s + Number(b.deposit_mxn||0), 0)
+    const totalComm = commissions
+      .filter(c => filtered.some(b => b.id === c.tour_booking_id))
+      .reduce((s,c) => s + Number(c.vendor_amount||0) + Number(c.manager_amount||0), 0)
+
+    const rows = filtered.map(b => {
+      const vendor = profiles.find(p => p.id === b.vendor_id)
+      const comm   = commissions.find(c => c.tour_booking_id === b.id)
+      const statusColors = { pending: '#f5a623', confirmed: '#3d5a2e', cancelled: '#c0392b' }
+      return `
+        <tr style="border-bottom:1px solid #eee">
+          <td style="padding:6px 8px;font-size:11px">${b.date}</td>
+          <td style="padding:6px 8px;font-size:11px">${String(b.hour).padStart(2,'0')}:00</td>
+          <td style="padding:6px 8px;font-size:11px;font-weight:600">${b.client_name}</td>
+          <td style="padding:6px 8px;font-size:11px">${b.hotel}</td>
+          <td style="padding:6px 8px;font-size:11px">${b.package}</td>
+          <td style="padding:6px 8px;font-size:11px;text-align:right">$${Number(b.total_mxn||0).toLocaleString('es-MX',{maximumFractionDigits:0})}</td>
+          <td style="padding:6px 8px;font-size:11px;text-align:right">$${Number(b.deposit_mxn||0).toLocaleString('es-MX',{maximumFractionDigits:0})}</td>
+          <td style="padding:6px 8px;font-size:11px">${vendor?.full_name||'—'}</td>
+          <td style="padding:6px 8px;font-size:11px;text-align:right">$${Number(comm?.vendor_amount||0).toLocaleString('es-MX',{maximumFractionDigits:0})}</td>
+          <td style="padding:6px 8px;font-size:11px;text-align:center">
+            <span style="background:${statusColors[b.status]||'#999'};color:#fff;padding:2px 6px;border-radius:4px;font-size:10px">${b.status?.toUpperCase()}</span>
+          </td>
+        </tr>`
+    }).join('')
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>Dink & Drink — Reporte ${periodLabel}</title>
+    <style>
+      body{font-family:Arial,sans-serif;margin:32px;color:#111}
+      h1{color:#3d5a2e;margin-bottom:4px}
+      .sub{color:#666;font-size:13px;margin-bottom:24px}
+      .stats{display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+      .stat{background:#f5f5f0;border-radius:8px;padding:12px 16px;min-width:120px}
+      .stat-label{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.05em}
+      .stat-val{font-size:20px;font-weight:700;color:#3d5a2e}
+      table{width:100%;border-collapse:collapse}
+      th{background:#3d5a2e;color:#fff;padding:8px;font-size:11px;text-align:left}
+      tr:nth-child(even){background:#f9f9f6}
+      .footer{margin-top:24px;font-size:11px;color:#999;text-align:center}
+    </style></head><body>
+    <h1>🏓 Dink & Drink by Picabol</h1>
+    <div class="sub">Reporte de Reservas — ${periodLabel} · Generado el ${now.toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'})}</div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Total Tours</div><div class="stat-val">${filtered.length}</div></div>
+      <div class="stat"><div class="stat-label">Confirmados</div><div class="stat-val">${confirmed.length}</div></div>
+      <div class="stat"><div class="stat-label">Cancelados</div><div class="stat-val">${cancelled.length}</div></div>
+      <div class="stat"><div class="stat-label">Ingreso Est.</div><div class="stat-val">$${totalMXN.toLocaleString('es-MX',{maximumFractionDigits:0})}</div></div>
+      <div class="stat"><div class="stat-label">Depósitos</div><div class="stat-val">$${totalDep.toLocaleString('es-MX',{maximumFractionDigits:0})}</div></div>
+      <div class="stat"><div class="stat-label">Comisiones</div><div class="stat-val">$${totalComm.toLocaleString('es-MX',{maximumFractionDigits:0})}</div></div>
+    </div>
+    <table>
+      <thead><tr>
+        <th>Fecha</th><th>Hora</th><th>Cliente</th><th>Hotel</th><th>Paquete</th>
+        <th style="text-align:right">Total MXN</th><th style="text-align:right">Depósito</th>
+        <th>Vendedor</th><th style="text-align:right">Comisión</th><th style="text-align:center">Status</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="footer">Picabol · Cancún, México · picabol.netlify.app</div>
+    </body></html>`
+
+    const blob = new Blob([html], { type: 'text/html' })
+    const url  = URL.createObjectURL(blob)
+    const win  = window.open(url, '_blank')
+    setTimeout(() => { win?.print(); URL.revokeObjectURL(url) }, 800)
+    notify(`✅ Reporte PDF listo para imprimir`)
+  }
+
   async function toggleIncentive(id, active) {
     await supabase.from('incentives').update({ active: !active }).eq('id', id)
     loadAll()
@@ -416,6 +553,11 @@ export default function Tours() {
                       {b.status === 'cancelled' && (
                         <div style={{ fontSize: 12, color: 'var(--rd)' }}>❌ Cancelado · $50/$25 aplicados</div>
                       )}
+                      <button className="btn btn-ghost btn-sm"
+                        onClick={() => deleteBooking(b.id)}
+                        style={{ fontSize: 11, color: 'var(--rd)', borderColor: 'var(--rd)', marginLeft: 6 }}>
+                        🗑 Eliminar
+                      </button>
                     </div>
                   </div>
                 )
@@ -526,6 +668,22 @@ export default function Tours() {
       {/* METRICS TAB */}
       {tab === 'metrics' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* Export buttons */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <span style={{ fontSize: 12, color: 'var(--mt)', alignSelf: 'center' }}>Exportar:</span>
+            {[
+              { label: '📊 Excel Semanal', action: () => exportExcel('week') },
+              { label: '📊 Excel Mensual', action: () => exportExcel('month') },
+              { label: '📄 PDF Semanal',   action: () => exportPDF('week') },
+              { label: '📄 PDF Mensual',   action: () => exportPDF('month') },
+            ].map(btn => (
+              <button key={btn.label} className="btn btn-ghost btn-sm"
+                style={{ fontSize: 11 }} onClick={btn.action}>
+                {btn.label}
+              </button>
+            ))}
+          </div>
 
           {/* Revenue by package */}
           <div className="card">
