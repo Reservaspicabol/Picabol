@@ -68,26 +68,23 @@ export default function Tours() {
   }
 
   async function updateBookingStatus(id, status) {
-  await supabase.from('tour_bookings').update({ status }).eq('id', id)
-  if (status === 'cancelled') {
-    const comm = commissions.find(c => c.tour_booking_id === id)
-    if (comm) {
-      await supabase.from('commissions').update({
-        vendor_amount: 50,
-        manager_amount: 25,
-        status: 'cancelled_partial'
-      }).eq('tour_booking_id', id)
+    await supabase.from('tour_bookings').update({ status }).eq('id', id)
+    if (status === 'cancelled') {
+      // Pay cancellation commissions
+      const comm = commissions.find(c => c.tour_booking_id === id)
+      if (comm) {
+        await supabase.from('commissions').update({
+          vendor_amount: 50,
+          manager_amount: 25,
+          status: 'cancelled_partial'
+        }).eq('tour_booking_id', id)
+      }
+      notify('Reserva cancelada — comisiones de cancelación aplicadas ($50 vendedor / $25 management)')
+    } else if (status === 'confirmed') {
+      await supabase.from('commissions').update({ status: 'confirmed' }).eq('tour_booking_id', id)
+      notify('✅ Check-in confirmado')
     }
-    notify('Reserva cancelada — comisiones de cancelación aplicadas ($50 vendedor / $25 management)')
-  } else if (status === 'confirmed') {
-    await supabase.from('commissions').update({ status: 'confirmed' }).eq('tour_booking_id', id)
-    notify('✅ Check-in confirmado')
-  }
-  // Update local state immediately
-  setBookings(prev => prev.map(b => b.id === id ? { ...b, status } : b))
-  // Also reload from DB to sync everything
-  loadAll()
-}
+    loadAll()
   }
 
   async function createManagement() {
@@ -174,6 +171,49 @@ export default function Tours() {
 
   async function deleteIncentive(id) {
     await supabase.from('incentives').delete().eq('id', id)
+    loadAll()
+  }
+
+  async function deleteUser(userId, role) {
+    const name = profiles.find(p => p.id === userId)?.full_name || 'este usuario'
+    if (!window.confirm(`¿Eliminar a ${name}? Se borrarán sus comisiones pero las reservas quedarán en el sistema.`)) return
+    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+    const SERVICE_KEY  = import.meta.env.VITE_SUPABASE_SERVICE_KEY
+    // Delete commissions
+    if (role === 'vendor') {
+      await supabase.from('commissions').delete().eq('vendor_id', userId)
+    } else {
+      await supabase.from('commissions').delete().eq('manager_id', userId)
+      // Also delete their vendors' commissions
+      const myVendors = profiles.filter(p => p.manager_id === userId)
+      for (const v of myVendors) {
+        await supabase.from('commissions').delete().eq('vendor_id', v.id)
+        await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${v.id}`, {
+          method: 'DELETE',
+          headers: { 'apikey': SERVICE_KEY, 'Authorization': `Bearer ${SERVICE_KEY}` }
+        })
+      }
+    }
+    // Delete from Auth
+    await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userId}`, {
+      method: 'DELETE',
+      headers: { 'apikey': SERVICE_KEY, 'Authorization': `Bearer ${SERVICE_KEY}` }
+    })
+    notify(`✅ Usuario eliminado correctamente`)
+    loadAll()
+  }
+
+  async function resetCommissions(userId, action) {
+    const name = profiles.find(p => p.id === userId)?.full_name || 'este usuario'
+    if (action === 'paid') {
+      if (!window.confirm(`¿Marcar comisiones de ${name} como PAGADAS?`)) return
+      await supabase.from('commissions').update({ status: 'paid' }).or(`vendor_id.eq.${userId},manager_id.eq.${userId}`)
+      notify(`✅ Comisiones de ${name} marcadas como pagadas`)
+    } else {
+      if (!window.confirm(`¿REINICIAR comisiones de ${name} a cero?`)) return
+      await supabase.from('commissions').update({ vendor_amount: 0, manager_amount: 0, status: 'reset' }).or(`vendor_id.eq.${userId},manager_id.eq.${userId}`)
+      notify(`🔄 Comisiones de ${name} reiniciadas a $0`)
+    }
     loadAll()
   }
 
@@ -455,7 +495,24 @@ export default function Tours() {
                         <div style={{ fontFamily: 'var(--font-cond)', fontSize: 18, fontWeight: 700, color: 'var(--g)' }}>
                           {myBookings.length} <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--mt)' }}>reservas</span>
                         </div>
-                        <div style={{ fontSize: 12, color: 'var(--mt)' }}>Comisiones: {fmtMXN(totalComm)}</div>
+                        <div style={{ fontSize: 12, color: 'var(--mt)', marginBottom: 8 }}>Comisiones: {fmtMXN(totalComm)}</div>
+                        <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                          <button className="btn btn-ghost btn-sm"
+                            style={{ fontSize: 10, padding: '2px 8px', height: 26, color: 'var(--g)', borderColor: 'var(--gd)' }}
+                            onClick={() => resetCommissions(mgmt.id, 'paid')}>
+                            💳 Pagadas
+                          </button>
+                          <button className="btn btn-ghost btn-sm"
+                            style={{ fontSize: 10, padding: '2px 8px', height: 26 }}
+                            onClick={() => resetCommissions(mgmt.id, 'reset')}>
+                            🔄 Reiniciar
+                          </button>
+                          <button className="btn btn-ghost btn-sm"
+                            style={{ fontSize: 10, padding: '2px 8px', height: 26, color: 'var(--rd)', borderColor: 'var(--rd)' }}
+                            onClick={() => deleteUser(mgmt.id, 'management')}>
+                            🗑 Eliminar
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -511,8 +568,25 @@ export default function Tours() {
                       {mgr ? `Management: ${mgr.full_name || mgr.email}` : 'Sin management'} · {count} reservas
                     </div>
                   </div>
-                  <div style={{ fontFamily: 'var(--font-cond)', fontSize: 16, fontWeight: 700, color: 'var(--g)' }}>
-                    {fmtMXN(total)}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ fontFamily: 'var(--font-cond)', fontSize: 16, fontWeight: 700, color: 'var(--g)' }}>
+                      {fmtMXN(total)}
+                    </div>
+                    <button className="btn btn-ghost btn-sm"
+                      style={{ fontSize: 10, padding: '2px 8px', height: 26, color: 'var(--g)', borderColor: 'var(--gd)' }}
+                      onClick={() => resetCommissions(v.id, 'paid')}>
+                      💳
+                    </button>
+                    <button className="btn btn-ghost btn-sm"
+                      style={{ fontSize: 10, padding: '2px 8px', height: 26 }}
+                      onClick={() => resetCommissions(v.id, 'reset')}>
+                      🔄
+                    </button>
+                    <button className="btn btn-ghost btn-sm"
+                      style={{ fontSize: 10, padding: '2px 8px', height: 26, color: 'var(--rd)', borderColor: 'var(--rd)' }}
+                      onClick={() => deleteUser(v.id, 'vendor')}>
+                      🗑
+                    </button>
                   </div>
                 </div>
               )
