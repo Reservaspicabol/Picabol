@@ -145,6 +145,108 @@ export default function Ventas() {
     },
   ]
 
+  function exportExcelGeneral(period) {
+    const now = new Date()
+    let periodLabel = period === 'hoy' ? 'Hoy' : period === 'semana' ? 'Semana' : 'Mes'
+
+    const courtRows = finished.map(b => [
+      b.date, String(b.hour).padStart(2,'0') + ':00', b.name, '—', b.city || '—',
+      b.modality === 'privada' ? 'Cancha Privada' : 'Open Play',
+      b.court, b.people || 0, b.revenue || 0, 0, b.revenue || 0, b.status || '—'
+    ])
+    const tourRows = tourBookings.map(b => [
+      b.date, String(b.hour).padStart(2,'0') + ':00', b.client_name, b.client_phone || '—', b.hotel || '—',
+      'Tour D&D ' + (b.package || ''), b.court, 0, b.total_mxn || 0, b.deposit_mxn || 0,
+      (b.total_mxn || 0) - (b.deposit_mxn || 0), b.status || '—'
+    ])
+    const drillRows = drillBookings.map(b => [
+      b.date, String(b.hour).padStart(2,'0') + ':00', b.client_name, b.client_phone || '—', '—',
+      'Drill ' + (b.type === 'private' ? 'Privado' : 'Colectivo'), b.court, b.people || 1,
+      b.total_mxn || 0, 0, b.total_mxn || 0, b.status || '—'
+    ])
+
+    const header = ['Fecha','Hora','Cliente','Teléfono','Hotel/Ciudad','Tipo','Cancha','Personas','Total MXN','Depósito MXN','Balance MXN','Status']
+    const allRows = [...courtRows, ...tourRows, ...drillRows].sort((a,b) => a[0]?.localeCompare(b[0]))
+    const csv = [header, ...allRows].map(r => r.map(v => '"' + v + '"').join(',')).join('
+')
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'picabol-reporte-' + periodLabel + '-' + now.toISOString().slice(0,10) + '.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function exportPDFGeneral(period) {
+    const now = new Date()
+    let periodLabel = period === 'hoy' ? 'Hoy' : period === 'semana' ? 'Esta Semana' : 'Este Mes'
+
+    const allRows = [
+      ...finished.map(b => ({
+        date: b.date, hour: b.hour, name: b.name, type: b.modality === 'privada' ? 'Cancha Privada' : 'Open Play',
+        location: b.city || '—', people: b.people || 0, total: b.revenue || 0, status: b.status, _color: b.modality === 'privada' ? '#3d5a2e' : '#1e4a8a'
+      })),
+      ...tourBookings.map(b => ({
+        date: b.date, hour: b.hour, name: b.client_name, type: 'Tour D&D ' + (b.package || ''),
+        location: b.hotel || '—', people: (parseInt(b.package)||2) + (b.extra_pax||0), total: b.total_mxn || 0, status: b.status, _color: '#4a7a35'
+      })),
+      ...drillBookings.map(b => ({
+        date: b.date, hour: b.hour, name: b.client_name, type: 'Drill ' + (b.type === 'private' ? 'Privado' : 'Colectivo'),
+        location: '—', people: b.people || 1, total: b.total_mxn || 0, status: b.status, _color: '#6b3fa0'
+      })),
+    ].sort((a,b) => a.date?.localeCompare(b.date))
+
+    const fmt = n => '$' + Number(n||0).toLocaleString('es-MX', {maximumFractionDigits:0})
+    const rows = allRows.map(b => `
+      <tr style="border-bottom:1px solid #eee">
+        <td style="padding:5px 8px;font-size:11px">${b.date}</td>
+        <td style="padding:5px 8px;font-size:11px">${String(b.hour).padStart(2,'0')}:00</td>
+        <td style="padding:5px 8px;font-size:11px;font-weight:600">${b.name}</td>
+        <td style="padding:5px 8px;font-size:10px"><span style="background:${b._color}22;color:${b._color};padding:2px 6px;border-radius:4px;font-weight:600">${b.type}</span></td>
+        <td style="padding:5px 8px;font-size:11px">${b.location}</td>
+        <td style="padding:5px 8px;font-size:11px;text-align:center">${b.people}</td>
+        <td style="padding:5px 8px;font-size:11px;text-align:right;font-weight:700;color:${b._color}">${fmt(b.total)}</td>
+        <td style="padding:5px 8px;font-size:10px;text-align:center"><span style="background:#eee;padding:2px 6px;border-radius:4px">${b.status?.toUpperCase()}</span></td>
+      </tr>`).join('')
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>Picabol — Reporte General ${periodLabel}</title>
+    <style>
+      body{font-family:Arial,sans-serif;margin:32px;color:#111}
+      h1{color:#3d5a2e;margin-bottom:4px;font-size:22px}
+      .sub{color:#666;font-size:13px;margin-bottom:20px}
+      .stats{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+      .stat{background:#f5f5f0;border-radius:8px;padding:10px 14px;min-width:110px}
+      .stat-label{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.05em}
+      .stat-val{font-size:18px;font-weight:700;color:#3d5a2e}
+      table{width:100%;border-collapse:collapse}
+      th{background:#3d5a2e;color:#fff;padding:7px 8px;font-size:11px;text-align:left}
+      tr:nth-child(even){background:#f9f9f6}
+      .footer{margin-top:20px;font-size:11px;color:#999;text-align:center}
+    </style></head><body>
+    <h1>🏓 PICABOL — Reporte General</h1>
+    <div class="sub">${periodLabel} · Generado el ${now.toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'})}</div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Total Reservas</div><div class="stat-val">${allRows.length}</div></div>
+      <div class="stat"><div class="stat-label">Canchas</div><div class="stat-val">${finished.length}</div></div>
+      <div class="stat"><div class="stat-label">Tours D&D</div><div class="stat-val">${tourBookings.length}</div></div>
+      <div class="stat"><div class="stat-label">Drills</div><div class="stat-val">${drillBookings.length}</div></div>
+      <div class="stat"><div class="stat-label">Ingreso Total</div><div class="stat-val">${fmt(totalRev)}</div></div>
+    </div>
+    <table>
+      <thead><tr><th>Fecha</th><th>Hora</th><th>Cliente</th><th>Tipo</th><th>Hotel/Ciudad</th><th style="text-align:center">Pax</th><th style="text-align:right">Total</th><th style="text-align:center">Status</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="footer">Picabol · Cancún, México</div>
+    </body></html>`
+
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    const win = window.open(url, '_blank')
+    setTimeout(() => { win?.print(); URL.revokeObjectURL(url) }, 800)
+  }
+
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--mt)' }}>
       Cargando datos...
@@ -166,6 +268,20 @@ export default function Ventas() {
               borderColor: period === p.key ? 'var(--g)' : 'var(--br)',
               fontWeight: period === p.key ? 700 : 400
             }}>{p.label}</button>
+        ))}
+      </div>
+
+      {/* Export buttons */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <span style={{ fontSize: 11, color: 'var(--mt)', alignSelf: 'center' }}>Exportar reporte general:</span>
+        {[
+          { label: '📊 Excel', action: () => exportExcelGeneral(period) },
+          { label: '📄 PDF',   action: () => exportPDFGeneral(period) },
+        ].map(btn => (
+          <button key={btn.label} className="btn btn-ghost btn-sm"
+            style={{ fontSize: 11 }} onClick={btn.action}>
+            {btn.label}
+          </button>
         ))}
       </div>
 
