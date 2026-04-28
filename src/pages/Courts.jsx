@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useBookings } from '../hooks/useBookings'
-import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import CourtCard from '../components/CourtCard'
 import BookingModal from '../components/BookingModal'
@@ -41,7 +40,18 @@ export default function Courts() {
   }
 
   async function handleSave(payload) {
-    const { error } = await createBooking({ ...payload, created_by: profile?.id })
+    const revenue = payload.modality === 'openplay'
+      ? 200 * (payload.people || 1)
+      : payload.duration === 2 ? 750 : 400
+
+    const { error } = await createBooking({
+      ...payload,
+      revenue,
+      created_by: profile?.id,
+      // For walkin: set scheduled_at so tolerance timer starts
+      // For reserva: no scheduled_at until they arrive
+      scheduled_at: payload.scheduled_at || null,
+    })
     if (!error) {
       pushNotif(`${payload.name} registrado en Cancha ${payload.court}`)
       setModal(null)
@@ -49,14 +59,18 @@ export default function Courts() {
     return error
   }
 
-  // Stats
-  const active   = bookings.filter(b => ['playing','waiting','reserved'].includes(b.status)).length
-  const revenue  = bookings.filter(b => ['playing','finished'].includes(b.status))
-                           .reduce((a, b) => a + Number(b.revenue || 0), 0)
-  const people   = bookings.reduce((a, b) => a + (b.people || 0), 0)
-  const gH       = bookings.reduce((a, b) => a + (b.gender_m || 0), 0)
-  const gF       = bookings.reduce((a, b) => a + (b.gender_f || 0), 0)
-  const gK       = bookings.reduce((a, b) => a + (b.gender_k || 0), 0)
+  // Stats — only count active/playing people, not cancelled/expired
+  const activePeopleBookings = bookings.filter(b =>
+    ['playing', 'finished', 'reserved', 'waiting'].includes(b.status)
+  )
+  const people = activePeopleBookings.reduce((a, b) => a + (b.people || 0), 0)
+  const gH     = activePeopleBookings.reduce((a, b) => a + (b.gender_m || 0), 0)
+  const gF     = activePeopleBookings.reduce((a, b) => a + (b.gender_f || 0), 0)
+  const gK     = activePeopleBookings.reduce((a, b) => a + (b.gender_k || 0), 0)
+
+  const active  = bookings.filter(b => ['playing','waiting','reserved','open-play','expired'].includes(b.status)).length
+  const revenue = bookings.filter(b => ['playing','finished'].includes(b.status))
+                          .reduce((a, b) => a + Number(b.revenue || 0), 0)
 
   return (
     <div>
@@ -119,6 +133,7 @@ export default function Courts() {
       ) : (
         <BookingModal
           court={modal.court}
+          mode={modal.mode}
           date={today}
           onSave={handleSave}
           onClose={() => setModal(null)}
