@@ -13,7 +13,7 @@ const DRILL_SLOTS = {
 }
 
 const PRIVATE_PRICES = { 1: 800, 2: 800, 3: 1000, 4: 1200 }
-const COLLECTIVE_PRICES = { single: 250, pack8: 1600, pack12: 2000 }
+const COLLECTIVE_PRICES = { single: 250, pack8: 1600, pack12: 2100 }
 const PREFERRED_COURTS = [1, 3, 2, 4]
 
 function fmtMXN(n) { return '$' + Number(n || 0).toLocaleString('es-MX', { maximumFractionDigits: 0 }) }
@@ -452,58 +452,122 @@ export default function Drills() {
       {/* PAQUETES TAB */}
       {tab === 'paquetes' && (
         <div>
-          <div style={{ fontFamily: 'var(--font-cond)', fontSize: 16, fontWeight: 700, marginBottom: 12 }}>Clientes con Paquete</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ fontFamily: 'var(--font-cond)', fontSize: 16, fontWeight: 700 }}>Clientes con Paquete</div>
+            <div style={{ fontSize: 12, color: 'var(--mt)' }}>
+              Selecciona un cliente para agendar su próxima clase
+            </div>
+          </div>
+
           {packClients.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: 40, color: 'var(--mt)', fontSize: 14 }}>No hay clientes con paquete activo</div>
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--mt)', fontSize: 14 }}>
+              No hay clientes con paquete activo
+            </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {packClients.map(d => (
-                <div key={d.id} className="card" style={{ padding: '12px 14px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                    <div>
-                      <div style={{ fontFamily: 'var(--font-cond)', fontSize: 15, fontWeight: 700, color: 'var(--tx)', marginBottom: 2 }}>
-                        {d.client_name}
+              {packClients.map(d => {
+                const totalClasses = d.package_type === 'pack8' ? 8 : 12
+                const usedClasses = totalClasses - d.classes_remaining
+                const isLow = d.classes_remaining <= 2
+                const isEmpty = d.classes_remaining <= 0
+                return (
+                  <div key={d.id} className="card" style={{
+                    padding: '14px 16px',
+                    border: isEmpty ? '1px solid var(--rd)' : isLow ? '1px solid var(--am)' : '1px solid var(--br)',
+                    opacity: isEmpty ? .6 : 1,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+                      {/* Client info */}
+                      <div style={{ flex: 1, minWidth: 200 }}>
+                        <div style={{ fontFamily: 'var(--font-cond)', fontSize: 16, fontWeight: 700, color: 'var(--tx)', marginBottom: 2 }}>
+                          {d.client_name}
+                        </div>
+                        {d.client_phone && <div style={{ fontSize: 12, color: 'var(--mt)', marginBottom: 2 }}>📱 {d.client_phone}</div>}
+                        <div style={{ fontSize: 11, color: 'var(--mt)' }}>
+                          {d.package_type === 'pack8' ? 'Paquete 8 clases' : 'Paquete 12 clases'} · Desde {fmtDate(d.date)}
+                        </div>
+
+                        {/* Progress bar */}
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--mt)', marginBottom: 3 }}>
+                            <span>{usedClasses} clases usadas</span>
+                            <span style={{ color: isLow ? 'var(--am)' : 'var(--mt)' }}>{d.classes_remaining} restantes</span>
+                          </div>
+                          <div style={{ height: 8, background: 'var(--sf)', borderRadius: 4, overflow: 'hidden' }}>
+                            <div style={{
+                              height: '100%', borderRadius: 4,
+                              background: isEmpty ? 'var(--rd)' : isLow ? 'var(--am)' : 'var(--g)',
+                              width: `${(usedClasses / totalClasses) * 100}%`,
+                              transition: 'width .3s ease'
+                            }} />
+                          </div>
+                        </div>
                       </div>
-                      {d.client_phone && <div style={{ fontSize: 12, color: 'var(--mt)' }}>{d.client_phone}</div>}
-                      <div style={{ fontSize: 12, color: 'var(--mt)', marginTop: 2 }}>
-                        Desde: {fmtDate(d.date)} · {fmtMXN(d.total_mxn)}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 11, color: 'var(--mt)', marginBottom: 4 }}>
-                        {d.package_type === 'pack8' ? 'Paquete 8 clases' : 'Paquete 12 clases'}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ background: 'var(--sf)', borderRadius: 6, padding: '4px 14px' }}>
-                          <div style={{ fontFamily: 'var(--font-cond)', fontSize: 24, fontWeight: 800, color: d.classes_remaining > 2 ? 'var(--g)' : 'var(--rd)' }}>
+
+                      {/* Classes counter + actions */}
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                        <div style={{
+                          background: 'var(--sf)', borderRadius: 10, padding: '8px 20px',
+                          textAlign: 'center', minWidth: 80,
+                          border: `2px solid ${isEmpty ? 'var(--rd)' : isLow ? 'var(--am)' : 'var(--gd)'}`
+                        }}>
+                          <div style={{
+                            fontFamily: 'var(--font-cond)', fontSize: 32, fontWeight: 800, lineHeight: 1,
+                            color: isEmpty ? 'var(--rd)' : isLow ? 'var(--am)' : 'var(--g)'
+                          }}>
                             {d.classes_remaining}
                           </div>
-                          <div style={{ fontSize: 9, color: 'var(--mt)', textAlign: 'center' }}>CLASES</div>
+                          <div style={{ fontSize: 9, color: 'var(--mt)', letterSpacing: '.05em', marginTop: 2 }}>CLASES</div>
                         </div>
-                        {d.classes_remaining > 0 && (
-                          <button className="btn btn-ghost btn-sm" onClick={() => deductClass(d.id)}
-                            style={{ fontSize: 11, color: 'var(--am)', borderColor: 'var(--am)' }}>
-                            −1 clase
+
+                        {/* Quick book button */}
+                        {!isEmpty && (
+                          <button
+                            className="btn btn-green btn-sm"
+                            style={{ width: '100%', fontSize: 11 }}
+                            onClick={() => {
+                              setDrillType('collective')
+                              setForm(f => ({
+                                ...f,
+                                clientName: d.client_name,
+                                clientPhone: d.client_phone || '',
+                                packageType: d.package_type,
+                                date: '', hour: '',
+                              }))
+                              setShowForm(true)
+                              setTab('reservas')
+                              notify(`✅ Cliente ${d.client_name} cargado — selecciona fecha y horario`)
+                            }}>
+                            📅 Agendar clase
                           </button>
+                        )}
+
+                        {/* Manual deduct */}
+                        {!isEmpty && (
+                          <button className="btn btn-ghost btn-sm"
+                            style={{ width: '100%', fontSize: 11, color: 'var(--am)', borderColor: 'var(--am)' }}
+                            onClick={() => deductClass(d.id)}>
+                            −1 manual
+                          </button>
+                        )}
+
+                        {isEmpty && (
+                          <div style={{ fontSize: 11, color: 'var(--rd)', fontWeight: 600, textAlign: 'center' }}>
+                            Sin clases
+                          </div>
                         )}
                       </div>
                     </div>
+
+                    {/* Low warning */}
+                    {isLow && !isEmpty && (
+                      <div style={{ marginTop: 10, fontSize: 11, color: 'var(--am)', background: '#2e2010', borderRadius: 6, padding: '6px 10px' }}>
+                        ⚠️ Quedan pocas clases — considera renovar el paquete
+                      </div>
+                    )}
                   </div>
-                  {/* Progress bar */}
-                  <div style={{ marginTop: 10 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--mt)', marginBottom: 3 }}>
-                      <span>Progreso del paquete</span>
-                      <span>{(d.package_type === 'pack8' ? 8 : 12) - d.classes_remaining} / {d.package_type === 'pack8' ? 8 : 12} usadas</span>
-                    </div>
-                    <div style={{ height: 6, background: 'var(--sf)', borderRadius: 3, overflow: 'hidden' }}>
-                      <div style={{
-                        height: '100%', borderRadius: 3, background: d.classes_remaining > 2 ? 'var(--g)' : 'var(--rd)',
-                        width: `${((d.package_type === 'pack8' ? 8 : 12) - d.classes_remaining) / (d.package_type === 'pack8' ? 8 : 12) * 100}%`
-                      }} />
-                    </div>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -530,7 +594,7 @@ export default function Drills() {
             {[
               { label: '1 clase suelta', price: 250, sub: 'Por clase' },
               { label: 'Paquete 8 clases', price: 1600, sub: '$200 por clase' },
-              { label: 'Paquete 12 clases', price: 2000, sub: '$167 por clase' },
+              { label: 'Paquete 12 clases', price: 2100, sub: '$175 por clase' },
             ].map(p => (
               <div key={p.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--br)' }}>
                 <div>
