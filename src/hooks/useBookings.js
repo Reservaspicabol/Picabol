@@ -19,7 +19,6 @@ export function useBookings(date) {
 
   useEffect(() => {
     fetch()
-    // Realtime subscription for this date
     const channel = supabase
       .channel('bookings-' + date)
       .on('postgres_changes', {
@@ -31,15 +30,40 @@ export function useBookings(date) {
   }, [date, fetch])
 
   async function createBooking(payload) {
-    const revenue = payload.modality === 'privada'
-      ? 400
-      : 200 * (payload.people || 1)
+    // Calculate revenue
+    const revenue = payload.modality === 'openplay'
+      ? 200 * (payload.people || 1)
+      : payload.duration === 2 ? 750 : 400
+
+    // For walkin: status = 'reserved' with scheduled_at set (tolerance starts immediately)
+    // For reserva: status = 'reserved' without scheduled_at (tolerance only starts on arrival)
+    const isWalkin = !!payload.scheduled_at
+
+    const insertPayload = {
+      date:         payload.date,
+      hour:         payload.hour,
+      court:        payload.court,
+      modality:     payload.modality,
+      name:         payload.name,
+      city:         payload.city || null,
+      people:       payload.people,
+      gender_m:     payload.gender_m || 0,
+      gender_f:     payload.gender_f || 0,
+      gender_k:     payload.gender_k || 0,
+      notes:        payload.notes || null,
+      duration:     payload.duration || 1,
+      revenue,
+      status:       'reserved',
+      scheduled_at: isWalkin ? payload.scheduled_at : null,
+      created_by:   payload.created_by || null,
+    }
 
     const { data, error } = await supabase
       .from('bookings')
-      .insert({ ...payload, revenue, status: 'reserved' })
+      .insert(insertPayload)
       .select()
       .single()
+
     if (!error) setBookings(prev => [...prev, data])
     return { data, error }
   }
@@ -61,9 +85,18 @@ export function useBookings(date) {
     return { error }
   }
 
-  // Court actions
   async function startPlay(id) {
-    return updateBooking(id, { status: 'playing', started_at: new Date().toISOString() })
+    // When play starts, set scheduled_at if not already set (for reserva mode)
+    const booking = bookings.find(b => b.id === id)
+    const updates = {
+      status: 'playing',
+      started_at: new Date().toISOString(),
+    }
+    // If no scheduled_at was set (reserva), set it now so tolerance calc works
+    if (!booking?.scheduled_at) {
+      updates.scheduled_at = new Date().toISOString()
+    }
+    return updateBooking(id, updates)
   }
 
   async function finishPlay(id) {
