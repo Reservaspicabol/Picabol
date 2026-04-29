@@ -320,7 +320,7 @@ export default function Drills() {
                     <select className="form-select" value={form.packageType} onChange={e => setForm(f => ({ ...f, packageType: e.target.value }))}>
                       <option value="single">1 clase suelta — $250</option>
                       <option value="pack8">Paquete 8 clases — $1,600</option>
-                      <option value="pack12">Paquete 12 clases — $2,000</option>
+                      <option value="pack12">Paquete 12 clases — $2,100</option>
                     </select>
                   </div>
                 )}
