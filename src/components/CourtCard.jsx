@@ -103,9 +103,7 @@ export default function CourtCard({ court, booking, onAction, onNotif }) {
   function renderActions() {
     if (!booking) return (
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
-        <button className="btn btn-teal btn-sm"  onClick={() => onAction(null, 'walkin',   court)}>Walkin</button>
-        <button className="btn btn-ghost btn-sm" onClick={() => onAction(null, 'reserva',  court)}>Reserva</button>
-        <button className="btn btn-blue btn-sm"  onClick={() => onAction(null, 'openplay', court)}>Open Play</button>
+        <button className="btn btn-teal btn-sm" onClick={() => onAction(null, 'walkin', court)}>Walkin</button>
       </div>
     )
     if (status === 'reserved' || status === 'waiting') return (
