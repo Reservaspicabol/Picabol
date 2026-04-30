@@ -28,7 +28,9 @@ export default function BookingModal({ court, hour, date, mode, onSave, onClose 
 
   function getRevenue() {
     if (isOpenPlay) return 200 * total
-    if (duration === 2) return 750
+    if (form.duration === 1.5) return 600
+    if (form.duration === 2)   return 750
+    if (form.duration === 2.5) return 950
     return 400
   }
 
@@ -41,10 +43,14 @@ export default function BookingModal({ court, hour, date, mode, onSave, onClose 
     setSaving(true)
     setError('')
 
+    const startHour   = Math.floor(selHour)
+    const startMinute = selHour % 1 === 0.5 ? 30 : 0
+
     const payload = {
-      date:     isReserva ? selDate : date,
-      hour:     selHour,
-      court:    selCourt,
+      date:         isReserva ? selDate : date,
+      hour:         startHour,
+      start_minute: startMinute,
+      court:        selCourt,
       modality: isOpenPlay ? 'openplay' : 'privada',
       name:     isOpenPlay ? roomName.trim() : name.trim(),
       city:     city.trim() || null,
@@ -163,7 +169,10 @@ export default function BookingModal({ court, hour, date, mode, onSave, onClose 
           <div>
             <label className="form-label">Hora de inicio</label>
             <select className="form-select" value={selHour} onChange={e => setSelHour(+e.target.value)}>
-              {HOURS.map(h => <option key={h} value={h}>{h}:00</option>)}
+              {HOURS.flatMap(h => [
+                <option key={h} value={h}>{h}:00</option>,
+                <option key={h+0.5} value={h+0.5}>{h}:30</option>
+              ])}
             </select>
           </div>
         </div>
