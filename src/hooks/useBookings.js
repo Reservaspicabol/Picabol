@@ -30,15 +30,15 @@ export function useBookings(date) {
   }, [date, fetch])
 
   async function createBooking(payload) {
-    // Calculate revenue
-    // duration stored as: 1, 1.5, 2, 2.5 hours
-    function calcRevenue(modality, duration, people) {
+    // Calculate revenue based on duration (in hours, can be decimal like 1.5)
+    function calcRevenue(modality, durationHours, people) {
       if (modality === 'openplay') return 200 * (people || 1)
-      if (duration === 1)   return 400
-      if (duration === 1.5) return 600
-      if (duration === 2)   return 750
-      if (duration === 2.5) return 950
-      return 400 * duration
+      const mins = Math.round(durationHours * 60)
+      if (mins <= 60)  return 400
+      if (mins <= 90)  return 600
+      if (mins <= 120) return 750
+      if (mins <= 150) return 950
+      return 400 + Math.ceil((mins - 60) / 30) * 200
     }
     const revenue = calcRevenue(payload.modality, payload.duration || 1, payload.people)
 
@@ -58,7 +58,7 @@ export function useBookings(date) {
       gender_f:     payload.gender_f || 0,
       gender_k:     payload.gender_k || 0,
       notes:        payload.notes || null,
-      duration:     payload.duration || 1,
+      duration:     parseFloat(payload.duration || 1),
       revenue,
       status:       'reserved',
       scheduled_at: isWalkin ? payload.scheduled_at : null,
