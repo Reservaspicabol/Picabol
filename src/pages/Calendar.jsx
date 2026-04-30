@@ -21,7 +21,7 @@ export default function Calendar() {
   const [detailModal, setDetailModal] = useState(null) // { booking, type }
   const [editMode, setEditMode] = useState(false)
   const [editForm, setEditForm] = useState({})
-  const [form, setForm] = useState({ name:'', city:'', modality:'privada', people:2, notes:'', duration:1 })
+  const [form, setForm] = useState({ name:'', city:'', modality:'privada', people:2, notes:'', startMin:0, endHour:0, endMin:0 })
   const [saving, setSaving] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
   const [error, setError] = useState('')
@@ -162,40 +162,53 @@ export default function Calendar() {
   async function saveBooking() {
     if (!form.name.trim()) return setError('Ingresa el nombre')
     const { hour, court } = modal
-    const slots = form.modality === 'openplay' ? OPENPLAY_HOURS : 1
-    for (let i = 0; i < slots; i++) {
+    const startMin     = form.startMin || 0
+    const endHour      = form.endHour  || hour + 1
+    const endMin       = form.endMin   || 0
+    const durationMins = (endHour * 60 + endMin) - (hour * 60 + startMin)
+
+    if (durationMins <= 0) return setError('La hora de fin debe ser después de la hora de inicio')
+
+    // Check all slots are free
+    const slotsToCheck = form.modality === 'openplay' ? OPENPLAY_HOURS : Math.ceil(durationMins / 60)
+    for (let i = 0; i < slotsToCheck; i++) {
       if (isSlotBlockedAll(selectedDay, court, hour + i)) {
         return setError(`Conflicto en Cancha ${court} a las ${hour + i}:00`)
       }
     }
-    if (hour + slots - 1 > HOURS[HOURS.length - 1]) {
-      return setError('Open Play excede el horario de cierre (21:00)')
+
+    // Revenue based on duration minutes
+    function calcRev(mod, mins, ppl) {
+      if (mod === 'openplay') return 200 * ppl
+      if (mins <= 60)  return 400
+      if (mins <= 90)  return 600
+      if (mins <= 120) return 750
+      if (mins <= 150) return 950
+      return 400 + Math.ceil((mins - 60) / 30) * 200
     }
+    const revenue      = calcRev(form.modality, durationMins, form.people)
+    const durationHours = durationMins / 60
+
     setSaving(true)
-    const duration = form.modality === 'privada' ? (form.duration || 1) : OPENPLAY_HOURS
-    function calcRev(dur) {
-      if (dur === 1.5) return 600
-      if (dur === 2)   return 750
-      if (dur === 2.5) return 950
-      return 400
-    }
-    const revenue = form.modality === 'privada' ? calcRev(duration) : 200 * form.people
     const { data, error } = await supabase.from('bookings').insert({
-      date: selectedDay, hour, court,
-      modality: form.modality,
-      duration: form.modality === 'privada' ? (form.duration || 1) : OPENPLAY_HOURS,
-      name: form.name.trim(),
-      city: form.city.trim() || null,
-      people: form.people,
-      notes: form.notes.trim() || null,
-      status: 'reserved',
+      date:         selectedDay,
+      hour,
+      court,
+      modality:     form.modality,
+      duration:     durationHours,
+      start_minute: startMin,
+      name:         form.name.trim(),
+      city:         form.city.trim() || null,
+      people:       form.people,
+      notes:        form.notes.trim() || null,
+      status:       'reserved',
       revenue,
-      created_by: profile?.id
+      created_by:   profile?.id
     }).select().single()
 
     if (error) { setError(error.message); setSaving(false); return }
     setBookings(prev => [...prev, data])
-    setNotif(`Guardado — ${form.modality === 'openplay' ? 'Sala: ' : ''}${form.name} · Cancha ${court} · ${hour}:00`)
+    setNotif(`Guardado — ${form.name} · Cancha ${court} · ${String(hour).padStart(2,'0')}:${String(startMin).padStart(2,'0')}–${String(endHour).padStart(2,'0')}:${String(endMin).padStart(2,'0')}`)
     setModal(null)
     setSaving(false)
   }
@@ -435,7 +448,7 @@ export default function Calendar() {
 
                   return (
                     <div key={court}
-                      onClick={() => { setModal({ hour: h, court }); setForm({ name:'', city:'', modality:'privada', people:2, notes:'', duration:1 }); setError('') }}
+                      onClick={() => { setModal({ hour: h, court }); setForm({ name:'', city:'', modality:'privada', people:2, notes:'', startMin:0, endHour:h+1, endMin:0 }); setError('') }}
                       style={{ background: 'var(--sf)', border: '1px solid var(--br)', borderRadius: 5, minHeight: 36, cursor: 'pointer', transition: 'all .15s' }}
                       onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--g)'; e.currentTarget.style.background = '#1e2a14' }}
                       onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--br)'; e.currentTarget.style.background = 'var(--sf)' }}
@@ -450,68 +463,133 @@ export default function Calendar() {
       })}
 
       {/* Add booking modal */}
-      {modal && (
-        <div style={{ marginTop: 14, background: 'var(--cd)', border: '1px solid var(--br)', borderRadius: 10, padding: 16 }}>
-          <div style={{ fontFamily: 'var(--font-cond)', fontSize: 18, fontWeight: 700, marginBottom: 12 }}>
-            Nueva reserva · Cancha {modal.court} · {modal.hour}:00
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-            <div>
-              <label className="form-label">Nombre</label>
-              <input className="form-input" value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} placeholder="Nombre del cliente" />
+      {modal && (() => {
+        // Calculate duration in minutes from start to end
+        const startTotalMins = modal.hour * 60 + (form.startMin || 0)
+        const endTotalMins   = (form.endHour || modal.hour+1) * 60 + (form.endMin || 0)
+        const durationMins   = endTotalMins - startTotalMins
+        const durationHours  = durationMins / 60
+
+        // Revenue calculation
+        function calcRev(mod, durMins, ppl) {
+          if (mod === 'openplay') return 200 * ppl
+          if (durMins <= 60)  return 400
+          if (durMins <= 90)  return 600
+          if (durMins <= 120) return 750
+          if (durMins <= 150) return 950
+          return 400 + Math.ceil((durMins - 60) / 30) * 200
+        }
+        const revenue = calcRev(form.modality, durationMins, form.people)
+
+        // End hour options: from start+30min up to closing
+        const halfHours = []
+        for (let h = modal.hour; h <= 21; h++) {
+          for (let m of [0, 30]) {
+            const totalM = h * 60 + m
+            if (totalM > startTotalMins && totalM <= 21 * 60) {
+              halfHours.push({ h, m, label: `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}` })
+            }
+          }
+        }
+
+        return (
+          <div style={{ marginTop: 14, background: 'var(--cd)', border: '1px solid var(--br)', borderRadius: 10, padding: 16 }}>
+            <div style={{ fontFamily: 'var(--font-cond)', fontSize: 18, fontWeight: 700, marginBottom: 12 }}>
+              Nueva reserva · Cancha {modal.court}
             </div>
-            <div>
-              <label className="form-label">Ciudad</label>
-              <input className="form-input" value={form.city} onChange={e => setForm(f => ({...f, city: e.target.value}))} placeholder="Cancún..." />
-            </div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-            <div>
-              <label className="form-label">Modalidad</label>
-              <select className="form-select" value={form.modality} onChange={e => setForm(f => ({...f, modality: e.target.value, duration: 1}))}>
-                <option value="privada">Cancha privada · $400 · 1 hora</option>
-                <option value="openplay">Open Play · $200/p · 3 horas</option>
-              </select>
-            </div>
-            <div>
-              <label className="form-label">Personas</label>
-              <input className="form-input" type="number" min="1" max="12" value={form.people} onChange={e => setForm(f => ({...f, people: +e.target.value}))} />
-            </div>
-          </div>
-          {form.modality === 'privada' && (
+
+            {/* Time selector */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
               <div>
-                <label className="form-label">Duración</label>
-                <select className="form-select" value={form.duration} onChange={e => setForm(f => ({...f, duration: +e.target.value}))}>
-                  <option value={1}>1 hora · $400</option>
-                  <option value={1.5}>1.5 horas · $600</option>
-                  <option value={2}>2 horas · $750</option>
-                  <option value={2.5}>2.5 horas · $950</option>
+                <label className="form-label">Hora de inicio</label>
+                <select className="form-select" value={`${modal.hour}:${form.startMin||0}`}
+                  onChange={e => {
+                    const [h, m] = e.target.value.split(':').map(Number)
+                    const newEnd = (form.endHour || modal.hour+1) * 60 + (form.endMin || 0)
+                    const newStart = h * 60 + m
+                    setForm(f => ({
+                      ...f, startMin: m,
+                      endHour: newEnd > newStart ? f.endHour : h+1,
+                      endMin:  newEnd > newStart ? f.endMin  : 0,
+                    }))
+                  }}>
+                  <option value={`${modal.hour}:0`}>{String(modal.hour).padStart(2,'0')}:00</option>
+                  <option value={`${modal.hour}:30`}>{String(modal.hour).padStart(2,'0')}:30</option>
                 </select>
               </div>
-              <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 4 }}>
-                <div style={{ fontSize: 12, color: 'var(--g)', fontWeight: 600 }}>
-                  Total: ${ form.duration === 1.5 ? '600' : form.duration === 2 ? '750' : form.duration === 2.5 ? '950' : '400'} MXN
-                </div>
+              <div>
+                <label className="form-label">Hora de fin</label>
+                <select className="form-select"
+                  value={`${form.endHour || modal.hour+1}:${form.endMin || 0}`}
+                  onChange={e => {
+                    const [h, m] = e.target.value.split(':').map(Number)
+                    setForm(f => ({...f, endHour: h, endMin: m}))
+                  }}>
+                  {halfHours.map(({h, m, label}) => (
+                    <option key={label} value={`${h}:${m}`}>{label}</option>
+                  ))}
+                </select>
               </div>
             </div>
-          )}
-          <div style={{ marginBottom: 10 }}>
-            <label className="form-label">Notas</label>
-            <input className="form-input" value={form.notes} onChange={e => setForm(f => ({...f, notes: e.target.value}))} placeholder="Cumpleaños, grupo especial..." />
-          </div>
-          {form.modality === 'openplay' && (
-            <div style={{ fontSize: 11, color: 'var(--bl)', marginBottom: 8 }}>
-              El Open Play bloquea 3 horas consecutivas en el calendario.
+
+            {/* Duration + price preview */}
+            {durationMins > 0 && (
+              <div style={{ background: 'var(--glight)', border: '1px solid var(--gd)', borderRadius: 6, padding: '8px 12px', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: 'var(--g)' }}>
+                  {durationMins} min ({durationHours % 1 === 0 ? durationHours : durationHours.toFixed(1)} h)
+                </span>
+                <span style={{ fontFamily: 'var(--font-cond)', fontSize: 16, fontWeight: 700, color: 'var(--g)' }}>
+                  ${revenue} MXN
+                </span>
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+              <div>
+                <label className="form-label">Modalidad</label>
+                <select className="form-select" value={form.modality}
+                  onChange={e => setForm(f => ({...f, modality: e.target.value,
+                    endHour: e.target.value === 'openplay' ? modal.hour+3 : f.endHour,
+                    endMin: 0
+                  }))}>
+                  <option value="privada">Cancha privada</option>
+                  <option value="openplay">Open Play · $200/p · 3h</option>
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Personas</label>
+                <input className="form-input" type="number" min="1" max="12" value={form.people}
+                  onChange={e => setForm(f => ({...f, people: +e.target.value}))} />
+              </div>
             </div>
-          )}
-          {error && <div style={{ background: '#2e0d0d', border: '1px solid #5a1a1a', color: 'var(--rd)', borderRadius: 6, padding: '7px 12px', fontSize: 12, marginBottom: 10 }}>{error}</div>}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-green" onClick={saveBooking} disabled={saving}>{saving ? 'Guardando...' : 'Guardar reserva'}</button>
-            <button className="btn btn-ghost" onClick={() => setModal(null)}>Cancelar</button>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+              <div>
+                <label className="form-label">Nombre</label>
+                <input className="form-input" value={form.name}
+                  onChange={e => setForm(f => ({...f, name: e.target.value}))} placeholder="Nombre del cliente" />
+              </div>
+              <div>
+                <label className="form-label">Ciudad</label>
+                <input className="form-input" value={form.city}
+                  onChange={e => setForm(f => ({...f, city: e.target.value}))} placeholder="Cancún..." />
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label className="form-label">Notas</label>
+              <input className="form-input" value={form.notes}
+                onChange={e => setForm(f => ({...f, notes: e.target.value}))} placeholder="Cumpleaños, grupo especial..." />
+            </div>
+
+            {error && <div style={{ background: '#2e0d0d', border: '1px solid #5a1a1a', color: 'var(--rd)', borderRadius: 6, padding: '7px 12px', fontSize: 12, marginBottom: 10 }}>{error}</div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-green" onClick={saveBooking} disabled={saving}>{saving ? 'Guardando...' : 'Guardar reserva'}</button>
+              <button className="btn btn-ghost" onClick={() => setModal(null)}>Cancelar</button>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* DETAIL MODAL */}
       {detailModal && (
