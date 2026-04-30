@@ -31,9 +31,16 @@ export function useBookings(date) {
 
   async function createBooking(payload) {
     // Calculate revenue
-    const revenue = payload.modality === 'openplay'
-      ? 200 * (payload.people || 1)
-      : payload.duration === 2 ? 750 : 400
+    // duration stored as: 1, 1.5, 2, 2.5 hours
+    function calcRevenue(modality, duration, people) {
+      if (modality === 'openplay') return 200 * (people || 1)
+      if (duration === 1)   return 400
+      if (duration === 1.5) return 600
+      if (duration === 2)   return 750
+      if (duration === 2.5) return 950
+      return 400 * duration
+    }
+    const revenue = calcRevenue(payload.modality, payload.duration || 1, payload.people)
 
     // For walkin: status = 'reserved' with scheduled_at set (tolerance starts immediately)
     // For reserva: status = 'reserved' without scheduled_at (tolerance only starts on arrival)
@@ -114,7 +121,11 @@ export function useBookings(date) {
   async function addTime(id, minutes) {
     const booking = bookings.find(b => b.id === id)
     if (!booking) return
-    return updateBooking(id, { extra_minutes: (booking.extra_minutes || 0) + minutes })
+    const extraRevenue = minutes === 30 ? 200 : minutes === 60 ? 400 : 0
+    return updateBooking(id, {
+      extra_minutes: (booking.extra_minutes || 0) + minutes,
+      revenue: Number(booking.revenue || 0) + extraRevenue
+    })
   }
 
   async function setWaiting(id) {
