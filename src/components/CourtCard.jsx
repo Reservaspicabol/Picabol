@@ -14,6 +14,8 @@ export default function CourtCard({ court, booking, onAction, onNotif }) {
 
   useEffect(() => {
     if (booking?.status !== 'reserved') return
+    // Only start tolerance countdown if scheduled_at is set (walkin arrived, not future reserva)
+    if (!booking?.scheduled_at) return
     const tol = toleranceMs(booking)
     if (tol <= 0) {
       onAction(booking.id, 'expire')
@@ -69,6 +71,14 @@ export default function CourtCard({ court, booking, onAction, onNotif }) {
       )
     }
     if (status === 'reserved' || status === 'waiting') {
+      // No scheduled_at = future reservation, don't show tolerance timer
+      if (!booking?.scheduled_at) {
+        return (
+          <div style={{ fontFamily: 'var(--font-cond)', fontSize: 14, color: 'var(--mt)', margin: '8px 0' }}>
+            ⏰ Reserva agendada · {booking.hour}:00
+          </div>
+        )
+      }
       const tol = toleranceMs(booking)
       const pct = Math.max(0, tol / TOLERANCE_MS * 100)
       const color = tol < 2 * 60 * 1000 ? 'var(--rd)' : 'var(--am)'
@@ -101,7 +111,6 @@ export default function CourtCard({ court, booking, onAction, onNotif }) {
     if (status === 'reserved' || status === 'waiting') return (
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <button className="btn btn-green btn-sm" onClick={() => onAction(booking.id, 'play')}>Llegó / Play</button>
-        {/* Host cannot cancel — only admin */}
         {!isHost && (
           <button className="btn btn-red btn-sm" onClick={() => onAction(booking.id, 'cancel')}>Cancelar</button>
         )}
