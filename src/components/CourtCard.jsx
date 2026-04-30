@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react'
+import { useAuth } from '../hooks/useAuth'
 import { fmtMs, remainingMs, toleranceMs, WARN_BEFORE_MS, TOLERANCE_MS } from '../lib/utils'
 
 export default function CourtCard({ court, booking, onAction, onNotif }) {
+  const { profile } = useAuth()
   const [, setTick] = useState(0)
+  const isHost = profile?.role === 'host'
 
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 1000)
     return () => clearInterval(id)
   }, [])
 
-  // ── Auto-expire tolerance ──────────────────────────────────────────────
   useEffect(() => {
     if (booking?.status !== 'reserved') return
     const tol = toleranceMs(booking)
@@ -22,7 +24,6 @@ export default function CourtCard({ court, booking, onAction, onNotif }) {
     }
   })
 
-  // ── 10-min play warning ────────────────────────────────────────────────
   useEffect(() => {
     if (booking?.status !== 'playing' && booking?.status !== 'open-play') return
     const rem = remainingMs(booking)
@@ -36,16 +37,15 @@ export default function CourtCard({ court, booking, onAction, onNotif }) {
     }
   })
 
-  // ── Render helpers ─────────────────────────────────────────────────────
   const status = booking?.status
 
   const statusConfig = {
-    available: { label: 'Disponible',        cls: 'badge-green', border: 'var(--br)' },
-    reserved:  { label: 'Reservada',          cls: 'badge-gray',  border: 'var(--mt)' },
-    waiting:   { label: 'Esperando llegada',  cls: 'badge-amber', border: 'var(--am)' },
-    playing:   { label: 'Jugando',            cls: 'badge-green', border: 'var(--g)'  },
-    expired:   { label: 'Cancelada (no llegó)',cls: 'badge-red',  border: 'var(--rd)' },
-    finished:  { label: 'Finalizada',         cls: 'badge-gray',  border: 'var(--br)' },
+    available: { label: 'Disponible',         cls: 'badge-green', border: 'var(--br)' },
+    reserved:  { label: 'Reservada',           cls: 'badge-gray',  border: 'var(--mt)' },
+    waiting:   { label: 'Esperando llegada',   cls: 'badge-amber', border: 'var(--am)' },
+    playing:   { label: 'Jugando',             cls: 'badge-green', border: 'var(--g)'  },
+    expired:   { label: 'Cancelada (no llegó)',cls: 'badge-red',   border: 'var(--rd)' },
+    finished:  { label: 'Finalizada',          cls: 'badge-gray',  border: 'var(--br)' },
   }
   const cfg = statusConfig[status || 'available']
 
@@ -57,14 +57,13 @@ export default function CourtCard({ court, booking, onAction, onNotif }) {
         + (booking.extra_minutes || 0) * 60000
       const pct = Math.max(0, rem / total * 100)
       const color = rem < WARN_BEFORE_MS ? 'var(--am)' : 'var(--g)'
-      const barColor = rem < WARN_BEFORE_MS ? 'var(--am)' : 'var(--g)'
       return (
         <>
           <div style={{ fontFamily: 'var(--font-cond)', fontSize: 46, fontWeight: 800, color, lineHeight: 1, margin: '8px 0' }}>
             {rem > 0 ? fmtMs(rem) : 'TIEMPO'}
           </div>
           <div style={{ background: '#2a2a2a', borderRadius: 4, height: 4, marginBottom: 10, overflow: 'hidden' }}>
-            <div style={{ width: `${pct}%`, height: '100%', background: barColor, transition: 'width .5s linear', borderRadius: 4 }} />
+            <div style={{ width: `${pct}%`, height: '100%', background: color, transition: 'width .5s linear', borderRadius: 4 }} />
           </div>
         </>
       )
@@ -94,28 +93,35 @@ export default function CourtCard({ court, booking, onAction, onNotif }) {
   function renderActions() {
     if (!booking) return (
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
-        <button className="btn btn-teal btn-sm"   onClick={() => onAction(null, 'walkin', court)}>Walkin</button>
-        <button className="btn btn-ghost btn-sm"  onClick={() => onAction(null, 'reserva', court)}>Reserva</button>
-        <button className="btn btn-blue btn-sm"   onClick={() => onAction(null, 'openplay', court)}>Open Play</button>
+        <button className="btn btn-teal btn-sm"  onClick={() => onAction(null, 'walkin',   court)}>Walkin</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => onAction(null, 'reserva',  court)}>Reserva</button>
+        <button className="btn btn-blue btn-sm"  onClick={() => onAction(null, 'openplay', court)}>Open Play</button>
       </div>
     )
     if (status === 'reserved' || status === 'waiting') return (
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <button className="btn btn-green btn-sm"  onClick={() => onAction(booking.id, 'play')}>Llegó / Play</button>
-        <button className="btn btn-red btn-sm"    onClick={() => onAction(booking.id, 'cancel')}>Cancelar</button>
+        <button className="btn btn-green btn-sm" onClick={() => onAction(booking.id, 'play')}>Llegó / Play</button>
+        {/* Host cannot cancel — only admin */}
+        {!isHost && (
+          <button className="btn btn-red btn-sm" onClick={() => onAction(booking.id, 'cancel')}>Cancelar</button>
+        )}
       </div>
     )
     if (status === 'playing') return (
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <button className="btn btn-amber btn-sm"  onClick={() => onAction(booking.id, 'add30')}>+30 min</button>
-        <button className="btn btn-amber btn-sm"  onClick={() => onAction(booking.id, 'add60')}>+1 hora</button>
-        <button className="btn btn-red btn-sm"    onClick={() => onAction(booking.id, 'end')}>Finalizar</button>
+        <button className="btn btn-amber btn-sm" onClick={() => onAction(booking.id, 'add30')}>+30 min</button>
+        <button className="btn btn-amber btn-sm" onClick={() => onAction(booking.id, 'add60')}>+1 hora</button>
+        <button className="btn btn-red btn-sm"   onClick={() => onAction(booking.id, 'end')}>Finalizar</button>
       </div>
     )
     if (status === 'expired') return (
-      <button className="btn btn-red btn-sm" onClick={() => onAction(booking.id, 'reactivate')}>
-        Reactivar manualmente
-      </button>
+      !isHost ? (
+        <button className="btn btn-red btn-sm" onClick={() => onAction(booking.id, 'reactivate')}>
+          Reactivar manualmente
+        </button>
+      ) : (
+        <div style={{ fontSize: 12, color: 'var(--rd)', textAlign: 'center' }}>Contacta al administrador</div>
+      )
     )
     return null
   }
@@ -127,7 +133,6 @@ export default function CourtCard({ court, booking, onAction, onNotif }) {
       borderRadius: 12, overflow: 'hidden',
       transition: 'border-color .2s'
     }}>
-      {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '10px 14px', borderBottom: '1px solid var(--br)'
@@ -138,7 +143,6 @@ export default function CourtCard({ court, booking, onAction, onNotif }) {
         <span className={`badge ${cfg.cls}`}>{cfg.label}</span>
       </div>
 
-      {/* Body */}
       <div style={{ padding: '12px 14px' }}>
         {!booking ? (
           <div style={{ textAlign: 'center', padding: '16px 0' }}>
