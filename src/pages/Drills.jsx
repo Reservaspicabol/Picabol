@@ -270,7 +270,7 @@ export default function Drills() {
               <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
                 {[
                   { id: 'private', label: '🎯 Privada' },
-                  { id: 'collective', label: '👥 Colectiva' },
+                  { id: 'collective', label: '📦 Paquetes' },
                 ].map(t => (
                   <button key={t.id} onClick={() => setDrillType(t.id)} className="btn btn-sm"
                     style={{
