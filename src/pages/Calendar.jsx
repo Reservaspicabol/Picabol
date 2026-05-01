@@ -26,6 +26,7 @@ export default function Calendar() {
   const [savingEdit, setSavingEdit] = useState(false)
   const [error, setError] = useState('')
   const [notif, setNotif] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(null) // booking id to confirm delete
 
   const days = getWeekDays(weekOffset)
 
@@ -90,15 +91,19 @@ export default function Calendar() {
     setDetailModal({ booking, type })
     setEditMode(false)
     setEditForm({
-      name: booking.name || booking.client_name || '',
-      city: booking.city || booking.hotel || '',
-      people: booking.people || 1,
-      notes: booking.notes || '',
-      hour: booking.hour,
-      court: booking.court,
+      name:         booking.name || booking.client_name || '',
+      city:         booking.city || booking.hotel || '',
+      people:       booking.people || 1,
+      gender_m:     booking.gender_m || 0,
+      gender_f:     booking.gender_f || 0,
+      gender_k:     booking.gender_k || 0,
+      notes:        booking.notes || '',
+      hour:         booking.start_minute === 30 ? booking.hour + 0.5 : booking.hour,
+      court:        booking.court,
       client_phone: booking.client_phone || '',
-      hotel: booking.hotel || '',
-      package: booking.package || '',
+      hotel:        booking.hotel || '',
+      package:      booking.package || '',
+      duration:     booking.duration || 1,
     })
   }
 
@@ -111,14 +116,29 @@ export default function Calendar() {
     if (type === 'booking') {
       const editHour   = Math.floor(parseFloat(editForm.hour))
       const editMinute = parseFloat(editForm.hour) % 1 === 0.5 ? 30 : 0
+      const dur        = parseFloat(editForm.duration || 1)
+      function calcRev(mins) {
+        if (mins <= 60)  return 400
+        if (mins <= 90)  return 600
+        if (mins <= 120) return 750
+        if (mins <= 150) return 950
+        return 400 + Math.ceil((mins - 60) / 30) * 200
+      }
+      const revenue = calcRev(dur * 60)
+      const people  = parseInt(editForm.gender_m||0) + parseInt(editForm.gender_f||0) + parseInt(editForm.gender_k||0) || parseInt(editForm.people)
       await supabase.from('bookings').update({
         name:         editForm.name,
         city:         editForm.city,
-        people:       parseInt(editForm.people),
+        people,
+        gender_m:     parseInt(editForm.gender_m || 0),
+        gender_f:     parseInt(editForm.gender_f || 0),
+        gender_k:     parseInt(editForm.gender_k || 0),
         notes:        editForm.notes,
         hour:         editHour,
         start_minute: editMinute,
         court:        parseInt(editForm.court),
+        duration:     dur,
+        revenue,
       }).eq('id', booking.id)
     } else if (type === 'tour') {
       await supabase.from('tour_bookings').update({
@@ -190,6 +210,7 @@ export default function Calendar() {
     const durationHours = durationMins / 60
 
     setSaving(true)
+    const totalPeople = (form.gM||0) + (form.gF||0) + (form.gK||0) || form.people
     const { data, error } = await supabase.from('bookings').insert({
       date:         selectedDay,
       hour,
@@ -199,7 +220,10 @@ export default function Calendar() {
       start_minute: startMin,
       name:         form.name.trim(),
       city:         form.city.trim() || null,
-      people:       form.people,
+      people:       totalPeople,
+      gender_m:     form.gM || 0,
+      gender_f:     form.gF || 0,
+      gender_k:     form.gK || 0,
       notes:        form.notes.trim() || null,
       status:       'reserved',
       revenue,
@@ -421,10 +445,19 @@ export default function Calendar() {
                           {booking.people}p{booking.city ? ` · ${booking.city}` : ''}
                         </div>
                         {!isPastHour && (
-                          <button
-                            onClick={e => deleteBooking(booking.id, e)}
-                            style={{ position: 'absolute', top: 3, right: 3, background: 'var(--rd)', border: 'none', borderRadius: 3, width: 14, height: 14, color: '#fff', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                          >×</button>
+                          confirmDelete === booking.id ? (
+                            <div style={{ position: 'absolute', top: 2, right: 2, display: 'flex', gap: 2, background: 'var(--cd)', borderRadius: 4, padding: 2, zIndex: 10 }}>
+                              <button onClick={e => { e.stopPropagation(); deleteBooking(booking.id); setConfirmDelete(null) }}
+                                style={{ background: 'var(--rd)', border: 'none', borderRadius: 3, padding: '1px 5px', color: '#fff', fontSize: 9, cursor: 'pointer' }}>✓</button>
+                              <button onClick={e => { e.stopPropagation(); setConfirmDelete(null) }}
+                                style={{ background: '#444', border: 'none', borderRadius: 3, padding: '1px 5px', color: '#fff', fontSize: 9, cursor: 'pointer' }}>✗</button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={e => { e.stopPropagation(); setConfirmDelete(booking.id) }}
+                              style={{ position: 'absolute', top: 3, right: 3, background: 'var(--rd)', border: 'none', borderRadius: 3, width: 14, height: 14, color: '#fff', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            >×</button>
+                          )
                         )}
                       </div>
                     )
@@ -448,7 +481,7 @@ export default function Calendar() {
 
                   return (
                     <div key={court}
-                      onClick={() => { setModal({ hour: h, court }); setForm({ name:'', city:'', modality:'privada', people:2, notes:'', startMin:0, endHour:h+1, endMin:0 }); setError('') }}
+                      onClick={() => { setModal({ hour: h, court }); setForm({ name:'', city:'', modality:'privada', people:2, gM:0, gF:0, gK:0, notes:'', startMin:0, endHour:h+1, endMin:0 }); setError('') }}
                       style={{ background: 'var(--sf)', border: '1px solid var(--br)', borderRadius: 5, minHeight: 36, cursor: 'pointer', transition: 'all .15s' }}
                       onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--g)'; e.currentTarget.style.background = '#1e2a14' }}
                       onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--br)'; e.currentTarget.style.background = 'var(--sf)' }}
@@ -576,6 +609,27 @@ export default function Calendar() {
               </div>
             </div>
 
+            {/* Contadores H/M/N */}
+            <div style={{ marginBottom: 10 }}>
+              <label className="form-label">Personas que ingresan</label>
+              <div style={{ marginTop: 6, background: 'var(--sf)', borderRadius: 8, padding: '10px 12px' }}>
+                {[['Hombres','gM'],['Mujeres','gF'],['Niños','gK']].map(([lbl, key]) => (
+                  <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <div style={{ fontSize: 12, color: 'var(--mt)', minWidth: 56 }}>{lbl}</div>
+                    <button type="button" className="btn btn-ghost btn-sm"
+                      style={{ width: 28, height: 28, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      onClick={e => { e.stopPropagation(); setForm(f => ({...f, [key]: Math.max(0, (f[key]||0) - 1)})) }}>−</button>
+                    <div style={{ fontFamily: 'var(--font-cond)', fontSize: 18, fontWeight: 700, minWidth: 24, textAlign: 'center' }}>
+                      {form[key] || 0}
+                    </div>
+                    <button type="button" className="btn btn-ghost btn-sm"
+                      style={{ width: 28, height: 28, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      onClick={e => { e.stopPropagation(); setForm(f => ({...f, [key]: (f[key]||0) + 1})) }}>+</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div style={{ marginBottom: 10 }}>
               <label className="form-label">Notas</label>
               <input className="form-input" value={form.notes}
@@ -668,11 +722,21 @@ export default function Calendar() {
                     ✏️ Editar
                   </button>
                   {detailModal.type === 'booking' && (
-                    <button className="btn btn-ghost btn-sm"
-                      onClick={() => deleteBooking(detailModal.booking.id)}
-                      style={{ color: 'var(--rd)', borderColor: 'var(--rd)' }}>
-                      🗑 Eliminar
-                    </button>
+                    confirmDelete === detailModal.booking.id ? (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, color: 'var(--rd)' }}>¿Confirmar?</span>
+                        <button className="btn btn-red btn-sm" onClick={() => { deleteBooking(detailModal.booking.id); setConfirmDelete(null) }}>
+                          Sí, eliminar
+                        </button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setConfirmDelete(null)}>No</button>
+                      </div>
+                    ) : (
+                      <button className="btn btn-ghost btn-sm"
+                        onClick={() => setConfirmDelete(detailModal.booking.id)}
+                        style={{ color: 'var(--rd)', borderColor: 'var(--rd)' }}>
+                        🗑 Eliminar
+                      </button>
+                    )
                   )}
                   <button className="btn btn-ghost btn-sm" onClick={() => { setDetailModal(null); setEditMode(false) }}>
                     Cerrar
@@ -706,8 +770,23 @@ export default function Calendar() {
                         <input className="form-input" value={editForm.city} onChange={e => setEditForm(f => ({...f, city: e.target.value}))} />
                       </div>
                       <div className="form-group">
-                        <label className="form-label">Personas</label>
-                        <input className="form-input" type="number" min="1" max="20" value={editForm.people} onChange={e => setEditForm(f => ({...f, people: e.target.value}))} />
+                        <label className="form-label">Personas que ingresan</label>
+                        <div style={{ background: 'var(--sf)', borderRadius: 8, padding: '8px 12px', marginTop: 4 }}>
+                          {[['Hombres','gender_m'],['Mujeres','gender_f'],['Niños','gender_k']].map(([lbl,key]) => (
+                            <div key={key} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                              <div style={{ fontSize:12, color:'var(--mt)', minWidth:56 }}>{lbl}</div>
+                              <button type="button" className="btn btn-ghost btn-sm"
+                                style={{ width:26,height:26,padding:0,display:'flex',alignItems:'center',justifyContent:'center' }}
+                                onClick={() => setEditForm(f => ({...f, [key]: Math.max(0,(f[key]||0)-1)}))}>−</button>
+                              <div style={{ fontFamily:'var(--font-cond)',fontSize:16,fontWeight:700,minWidth:20,textAlign:'center' }}>
+                                {editForm[key] || 0}
+                              </div>
+                              <button type="button" className="btn btn-ghost btn-sm"
+                                style={{ width:26,height:26,padding:0,display:'flex',alignItems:'center',justifyContent:'center' }}
+                                onClick={() => setEditForm(f => ({...f, [key]: (f[key]||0)+1}))}>+</button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                       <div className="form-group">
                         <label className="form-label">Duración</label>
