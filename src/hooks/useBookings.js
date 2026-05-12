@@ -30,7 +30,6 @@ export function useBookings(date) {
   }, [date, fetch])
 
   async function createBooking(payload) {
-    // Calculate revenue based on duration (in hours, can be decimal like 1.5)
     function calcRevenue(modality, durationHours, people) {
       if (modality === 'openplay') return 200 * (people || 1)
       const mins = Math.round(durationHours * 60)
@@ -41,9 +40,6 @@ export function useBookings(date) {
       return 400 + Math.ceil((mins - 60) / 30) * 200
     }
     const revenue = calcRevenue(payload.modality, payload.duration || 1, payload.people)
-
-    // For walkin: status = 'reserved' with scheduled_at set (tolerance starts immediately)
-    // For reserva: status = 'reserved' without scheduled_at (tolerance only starts on arrival)
     const isWalkin = !!payload.scheduled_at
 
     const insertPayload = {
@@ -93,13 +89,11 @@ export function useBookings(date) {
   }
 
   async function startPlay(id) {
-    // When play starts, set scheduled_at if not already set (for reserva mode)
     const booking = bookings.find(b => b.id === id)
     const updates = {
-      status: 'playing',
+      status:     'playing',
       started_at: new Date().toISOString(),
     }
-    // If no scheduled_at was set (reserva), set it now so tolerance calc works
     if (!booking?.scheduled_at) {
       updates.scheduled_at = new Date().toISOString()
     }
@@ -124,21 +118,38 @@ export function useBookings(date) {
     const extraRevenue = minutes === 30 ? 200 : minutes === 60 ? 400 : 0
     return updateBooking(id, {
       extra_minutes: (booking.extra_minutes || 0) + minutes,
-      revenue: Number(booking.revenue || 0) + extraRevenue
+      revenue:       Number(booking.revenue || 0) + extraRevenue
     })
   }
 
   async function setWaiting(id) {
     return updateBooking(id, {
-      status: 'waiting',
+      status:       'waiting',
       scheduled_at: new Date().toISOString()
+    })
+  }
+
+  // Agrega un jugador a una sala open play (pending o playing).
+  // Solo suma, nunca resta. Actualiza people + revenue + notes_players.
+  async function addOpenPlayPlayer(id, playerName) {
+    const booking = bookings.find(b => b.id === id)
+    if (!booking) return { error: { message: 'Reserva no encontrada' } }
+    let players = []
+    try { players = JSON.parse(booking.notes_players || '[]') } catch { players = [] }
+    players.push(playerName)
+    return updateBooking(id, {
+      people:        players.length,
+      revenue:       players.length * 200,
+      notes_players: JSON.stringify(players),
     })
   }
 
   return {
     bookings, loading, refetch: fetch,
     createBooking, updateBooking, deleteBooking,
-    startPlay, finishPlay, cancelBooking, expireBooking, addTime, setWaiting
+    startPlay, finishPlay, cancelBooking, expireBooking,
+    addTime, setWaiting,
+    addOpenPlayPlayer,
   }
 }
 
