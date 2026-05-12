@@ -3,6 +3,7 @@ import { useBookings } from '../hooks/useBookings'
 import { useAuth } from '../hooks/useAuth'
 import CourtCard from '../components/CourtCard'
 import BookingModal from '../components/BookingModal'
+import OpenPlayRoomModal from '../components/OpenPlayRoomModal'
 import { todayStr, fmtMXN } from '../lib/utils'
 
 export default function Courts() {
@@ -10,11 +11,13 @@ export default function Courts() {
   const { profile } = useAuth()
   const {
     bookings, createBooking, updateBooking,
-    startPlay, finishPlay, cancelBooking, expireBooking, addTime
+    startPlay, finishPlay, cancelBooking, expireBooking, addTime,
+    addOpenPlayPlayer,
   } = useBookings(today)
 
-  const [modal, setModal]   = useState(null)   // { court, mode }
-  const [notifs, setNotifs] = useState([])
+  const [modal, setModal]               = useState(null)   // { court, mode }
+  const [openPlayModal, setOpenPlayModal] = useState(null)  // booking open play activo
+  const [notifs, setNotifs]             = useState([])
 
   function pushNotif(msg, type = 'ok') {
     const id = Date.now()
@@ -25,6 +28,12 @@ export default function Courts() {
   async function handleAction(bookingId, action, court) {
     if (action === 'walkin' || action === 'reserva' || action === 'openplay') {
       setModal({ court, mode: action })
+      return
+    }
+    // Abrir sala Open Play existente para agregar jugadores / hacer check-in
+    if (action === 'open-room') {
+      const booking = bookings.find(b => b.id === bookingId)
+      if (booking) setOpenPlayModal(booking)
       return
     }
     if (action === 'play')       { await startPlay(bookingId);    pushNotif(`Cancha ${court} — juego iniciado`) }
@@ -47,9 +56,7 @@ export default function Courts() {
     const { error } = await createBooking({
       ...payload,
       revenue,
-      created_by: profile?.id,
-      // For walkin: set scheduled_at so tolerance timer starts
-      // For reserva: no scheduled_at until they arrive
+      created_by:   profile?.id,
       scheduled_at: payload.scheduled_at || null,
     })
     if (!error) {
@@ -138,6 +145,45 @@ export default function Courts() {
           onSave={handleSave}
           onClose={() => setModal(null)}
         />
+      )}
+
+      {/* Modal de sala Open Play */}
+      {openPlayModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)',
+          zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+        }} onClick={() => setOpenPlayModal(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 500 }}>
+            <OpenPlayRoomModal
+              booking={openPlayModal}
+              onUpdate={async (id, updates) => {
+                const result = await updateBooking(id, updates)
+                if (!result.error) {
+                  setOpenPlayModal(prev => ({ ...prev, ...updates }))
+                  pushNotif('Sala actualizada')
+                }
+                return result
+              }}
+              onStartPlay={async (id) => {
+                const result = await startPlay(id)
+                if (!result.error) {
+                  setOpenPlayModal(prev => ({ ...prev, status: 'playing', started_at: new Date().toISOString() }))
+                  pushNotif('¡Sala en juego! Base congelada')
+                }
+                return result
+              }}
+              onFinish={async (id) => {
+                const result = await finishPlay(id)
+                if (!result.error) {
+                  pushNotif('Sala cerrada — revenue sumado al reporte')
+                  setOpenPlayModal(null)
+                }
+                return result
+              }}
+              onClose={() => setOpenPlayModal(null)}
+            />
+          </div>
+        </div>
       )}
     </div>
   )
