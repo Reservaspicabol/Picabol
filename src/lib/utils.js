@@ -5,7 +5,6 @@ export const HOURS = Array.from({ length: 15 }, (_, i) => i + 7)   // 7–21
 export const COURTS = [1, 2, 3, 4]
 export const DAYS_ES = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb']
 export const MONTHS_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
-
 export const TOLERANCE_MS   = 10 * 60 * 1000   // 10 min
 export const WARN_BEFORE_MS = 10 * 60 * 1000   // aviso a 10 min del fin
 export const HOUR_MS        = 60 * 60 * 1000
@@ -43,26 +42,34 @@ export function getWeekDays(weekOffset = 0) {
   return Array.from({ length: 7 }, (_, i) => addDays(mon, i + weekOffset * 7))
 }
 
-// How many ms remain for a booking that's in 'playing' state
+// Cuántos ms faltan para que termine una sesión en estado 'playing'
 export function remainingMs(booking) {
   if (!booking.started_at) return 0
-  const durationMs = (booking.modality === 'openplay' ? 3 : 1) * HOUR_MS
+  const durationHours = booking.modality === 'openplay'
+    ? 3
+    : (parseFloat(booking.duration) || 1)
+  const durationMs = durationHours * HOUR_MS
     + (booking.extra_minutes || 0) * 60 * 1000
   const elapsed = Date.now() - new Date(booking.started_at).getTime()
   return durationMs - elapsed
 }
 
-// How many ms remain in the 10-min tolerance window
+// Cuántos ms quedan en la ventana de tolerancia de 10 min
 export function toleranceMs(booking) {
   if (!booking.scheduled_at) return TOLERANCE_MS
   const elapsed = Date.now() - new Date(booking.scheduled_at).getTime()
   return TOLERANCE_MS - elapsed
 }
 
+// Revenue esperado según modalidad y duración
 export function revenueForBooking(booking) {
-  return booking.modality === 'privada'
-    ? 400
-    : 200 * (booking.people || 1)
+  if (booking.modality === 'openplay') return 200 * (booking.people || 1)
+  const mins = Math.round((parseFloat(booking.duration) || 1) * 60)
+  if (mins <= 60)  return 400
+  if (mins <= 90)  return 600
+  if (mins <= 120) return 750
+  if (mins <= 150) return 950
+  return 400
 }
 
 // Checks if a slot (date, court, hour) is blocked by an existing booking
