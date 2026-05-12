@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { fetchBookingsRange } from '../hooks/useBookings'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import OpenPlayRoomModal from '../components/OpenPlayRoomModal'
 import {
   HOURS, COURTS, DAYS_ES, MONTHS_ES, OPENPLAY_HOURS,
   getWeekDays, ymd, todayStr, isSlotBlocked, fmtMXN
@@ -18,7 +19,8 @@ export default function Calendar() {
   const [tourBookings, setTourBookings] = useState([])
   const [drillBookings, setDrillBookings] = useState([])
   const [modal, setModal] = useState(null)
-  const [detailModal, setDetailModal] = useState(null) // { booking, type }
+  const [detailModal, setDetailModal] = useState(null)
+  const [openPlayModal, setOpenPlayModal] = useState(null)
   const [editMode, setEditMode] = useState(false)
   const [editForm, setEditForm] = useState({})
   const [form, setForm] = useState({ name:'', city:'', modality:'privada', people:2, notes:'', startMin:0, endHour:0, endMin:0 })
@@ -26,32 +28,30 @@ export default function Calendar() {
   const [savingEdit, setSavingEdit] = useState(false)
   const [error, setError] = useState('')
   const [notif, setNotif] = useState('')
-  const [confirmDelete, setConfirmDelete] = useState(null) // booking id to confirm delete
+  const [confirmDelete, setConfirmDelete] = useState(null)
 
   const days = getWeekDays(weekOffset)
 
-  useEffect(() => {
-    const currentDays = getWeekDays(weekOffset)
+  async function reloadWeek(offset) {
+    const currentDays = getWeekDays(offset ?? weekOffset)
     const from = ymd(currentDays[0])
     const to   = ymd(currentDays[6])
+    const [b, t, d] = await Promise.all([
+      fetchBookingsRange(from, to),
+      supabase.from('tour_bookings').select('*').gte('date', from).lte('date', to).neq('status', 'cancelled'),
+      supabase.from('drills').select('*').gte('date', from).lte('date', to).neq('status', 'cancelled'),
+    ])
+    setBookings(b.data || [])
+    setTourBookings(t.data || [])
+    setDrillBookings(d.data || [])
+  }
 
-    async function loadAll() {
-      const [b, t, d] = await Promise.all([
-        fetchBookingsRange(from, to),
-        supabase.from('tour_bookings').select('*').gte('date', from).lte('date', to).neq('status', 'cancelled'),
-        supabase.from('drills').select('*').gte('date', from).lte('date', to).neq('status', 'cancelled'),
-      ])
-      setBookings(b.data || [])
-      setTourBookings(t.data || [])
-      setDrillBookings(d.data || [])
-    }
-
-    loadAll()
-
+  useEffect(() => {
+    reloadWeek(weekOffset)
     const channel = supabase.channel('cal-week-full')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, loadAll)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tour_bookings' }, loadAll)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'drills' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => reloadWeek(weekOffset))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tour_bookings' }, () => reloadWeek(weekOffset))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'drills' }, () => reloadWeek(weekOffset))
       .subscribe()
     return () => supabase.removeChannel(channel)
   }, [weekOffset])
@@ -59,7 +59,6 @@ export default function Calendar() {
   const tourBookingsNormalized = tourBookings.map(tb => ({
     ...tb, modality: 'tour', name: `🏓 Tour: ${tb.client_name}`, people: 1,
   }))
-  const allBookings = [...bookings, ...tourBookingsNormalized]
 
   const weekLabel = (() => {
     const f = days[0], l = days[6]
@@ -86,8 +85,12 @@ export default function Calendar() {
     return null
   }
 
-  // Open detail modal
   function openDetail(booking, type) {
+    // Si es open play, abrir el modal de sala dedicado
+    if (type === 'booking' && booking.modality === 'openplay') {
+      setOpenPlayModal(booking)
+      return
+    }
     setDetailModal({ booking, type })
     setEditMode(false)
     setEditForm({
@@ -107,7 +110,6 @@ export default function Calendar() {
     })
   }
 
-  // Save edit
   async function saveEdit() {
     if (!detailModal) return
     setSavingEdit(true)
@@ -142,37 +144,25 @@ export default function Calendar() {
       }).eq('id', booking.id)
     } else if (type === 'tour') {
       await supabase.from('tour_bookings').update({
-        client_name: editForm.name,
+        client_name:  editForm.name,
         client_phone: editForm.client_phone,
-        hotel: editForm.hotel,
-        hour: parseInt(editForm.hour),
-        court: parseInt(editForm.court),
-        notes: editForm.notes,
+        hotel:        editForm.hotel,
+        hour:         parseInt(editForm.hour),
+        court:        parseInt(editForm.court),
+        notes:        editForm.notes,
       }).eq('id', booking.id)
     } else if (type === 'drill') {
       await supabase.from('drills').update({
-        client_name: editForm.name,
+        client_name:  editForm.name,
         client_phone: editForm.client_phone,
-        hour: parseInt(editForm.hour),
-        court: parseInt(editForm.court),
-        notes: editForm.notes,
-        people: parseInt(editForm.people),
+        hour:         parseInt(editForm.hour),
+        court:        parseInt(editForm.court),
+        notes:        editForm.notes,
+        people:       parseInt(editForm.people),
       }).eq('id', booking.id)
     }
 
-    // Reload
-    const currentDays = getWeekDays(weekOffset)
-    const from = ymd(currentDays[0])
-    const to   = ymd(currentDays[6])
-    const [b, t, d] = await Promise.all([
-      fetchBookingsRange(from, to),
-      supabase.from('tour_bookings').select('*').gte('date', from).lte('date', to).neq('status', 'cancelled'),
-      supabase.from('drills').select('*').gte('date', from).lte('date', to).neq('status', 'cancelled'),
-    ])
-    setBookings(b.data || [])
-    setTourBookings(t.data || [])
-    setDrillBookings(d.data || [])
-
+    await reloadWeek()
     setNotif('✅ Reserva actualizada')
     setDetailModal(null)
     setEditMode(false)
@@ -189,7 +179,6 @@ export default function Calendar() {
 
     if (durationMins <= 0) return setError('La hora de fin debe ser después de la hora de inicio')
 
-    // Check all slots are free
     const slotsToCheck = form.modality === 'openplay' ? OPENPLAY_HOURS : Math.ceil(durationMins / 60)
     for (let i = 0; i < slotsToCheck; i++) {
       if (isSlotBlockedAll(selectedDay, court, hour + i)) {
@@ -197,7 +186,6 @@ export default function Calendar() {
       }
     }
 
-    // Revenue based on duration minutes
     function calcRev(mod, mins, ppl) {
       if (mod === 'openplay') return 200 * ppl
       if (mins <= 60)  return 400
@@ -206,7 +194,7 @@ export default function Calendar() {
       if (mins <= 150) return 950
       return 400 + Math.ceil((mins - 60) / 30) * 200
     }
-    const revenue      = calcRev(form.modality, durationMins, form.people)
+    const revenue       = calcRev(form.modality, durationMins, form.people)
     const durationHours = durationMins / 60
 
     setSaving(true)
@@ -251,7 +239,6 @@ export default function Calendar() {
   const dayDrills    = drillBookings.filter(b => b.date === selectedDay)
   const dayRevenue   = dayBookings.reduce((a, b) => a + Number(b.revenue || 0), 0)
 
-  // Upcoming bookings for selected day (future hours only)
   const currentHour  = new Date().getHours()
   const upcomingAll  = [
     ...dayBookings.filter(b => b.date > today || (b.date === today && b.hour >= currentHour))
@@ -296,7 +283,7 @@ export default function Calendar() {
         {days.map(d => {
           const ds = ymd(d)
           const count = bookings.filter(b => b.date === ds).length + tourBookings.filter(b => b.date === ds).length + drillBookings.filter(b => b.date === ds).length
-          const isToday = ds === today
+          const isToday  = ds === today
           const isActive = ds === selectedDay
           return (
             <div key={ds} onClick={() => setSelectedDay(ds)} style={{
@@ -362,7 +349,7 @@ export default function Calendar() {
 
       {/* Timeline */}
       {HOURS.map(h => {
-        const isPastDay = selectedDay < today
+        const isPastDay  = selectedDay < today
         const isPastHour = isPastDay || (selectedDay === today && h < new Date().getHours())
         return (
           <div key={h}>
@@ -372,14 +359,13 @@ export default function Calendar() {
               </div>
               <div style={{ flex: 1, display: 'grid', gridTemplateColumns: `repeat(${visibleCourts.length}, 1fr)`, gap: 3 }}>
                 {visibleCourts.map(court => {
-                  const booking     = bookings.find(b => b.date === selectedDay && b.court === court && b.hour === h)
-                  const tourBooking = tourBookings.find(b => b.date === selectedDay && b.court === court && b.hour === h)
+                  const booking      = bookings.find(b => b.date === selectedDay && b.court === court && b.hour === h)
+                  const tourBooking  = tourBookings.find(b => b.date === selectedDay && b.court === court && b.hour === h)
                   const drillBooking = drillBookings.find(b => b.date === selectedDay && b.court === court && b.hour === h)
-                  const blocker     = !booking && !tourBooking && !drillBooking ? isSlotBlockedAll(selectedDay, court, h) : null
+                  const blocker      = !booking && !tourBooking && !drillBooking ? isSlotBlockedAll(selectedDay, court, h) : null
                   const isOPContinuation   = blocker && blocker.modality === 'openplay' && blocker.hour !== h
                   const isTourContinuation = blocker && blocker.type === 'tour' && blocker.hour !== h
 
-                  // Tour booking start
                   if (tourBooking) {
                     return (
                       <div key={court} onClick={() => openDetail(tourBooking, 'tour')} style={{
@@ -397,7 +383,6 @@ export default function Calendar() {
                     )
                   }
 
-                  // Drill booking
                   if (drillBooking) {
                     return (
                       <div key={court} onClick={() => openDetail(drillBooking, 'drill')} style={{
@@ -414,7 +399,6 @@ export default function Calendar() {
                     )
                   }
 
-                  // Tour continuation
                   if (isTourContinuation) {
                     const isLast = h === blocker.hour + TOUR_HOURS - 1
                     return (
@@ -426,7 +410,6 @@ export default function Calendar() {
                     )
                   }
 
-                  // Regular booking
                   if (booking) {
                     const isOP = booking.modality === 'openplay'
                     return (
@@ -439,10 +422,10 @@ export default function Calendar() {
                         opacity: isPastHour && !isOP ? .6 : 1, cursor: 'pointer',
                       }}>
                         <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: isOP ? 'var(--bl)' : 'var(--g)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {isOP ? `Sala: ${booking.name}` : booking.name}
+                          {isOP ? `👥 ${booking.name}` : booking.name}
                         </div>
                         <div style={{ fontSize: 10, color: 'var(--mt)' }}>
-                          {booking.people}p{booking.city ? ` · ${booking.city}` : ''}
+                          {isOP ? `${booking.people}p · $${booking.revenue} MXN` : `${booking.people}p${booking.city ? ` · ${booking.city}` : ''}`}
                         </div>
                         {!isPastHour && (
                           confirmDelete === booking.id ? (
@@ -463,14 +446,14 @@ export default function Calendar() {
                     )
                   }
 
-                  // Open play continuation
                   if (isOPContinuation) {
                     const isLast = h === blocker.hour + OPENPLAY_HOURS - 1
                     return (
-                      <div key={court} style={{
+                      <div key={court} onClick={() => openDetail(blocker, 'booking')} style={{
                         background: '#0d1e35', border: '1px solid #1e4a8a',
                         borderTop: 'none', borderRadius: isLast ? '0 0 5px 5px' : 0,
-                        borderBottom: isLast ? undefined : 'none', minHeight: 36
+                        borderBottom: isLast ? undefined : 'none', minHeight: 36,
+                        cursor: 'pointer',
                       }} />
                     )
                   }
@@ -497,13 +480,11 @@ export default function Calendar() {
 
       {/* Add booking modal */}
       {modal && (() => {
-        // Calculate duration in minutes from start to end
         const startTotalMins = modal.hour * 60 + (form.startMin || 0)
         const endTotalMins   = (form.endHour || modal.hour+1) * 60 + (form.endMin || 0)
         const durationMins   = endTotalMins - startTotalMins
         const durationHours  = durationMins / 60
 
-        // Revenue calculation
         function calcRev(mod, durMins, ppl) {
           if (mod === 'openplay') return 200 * ppl
           if (durMins <= 60)  return 400
@@ -514,13 +495,12 @@ export default function Calendar() {
         }
         const revenue = calcRev(form.modality, durationMins, form.people)
 
-        // End hour options: from start+30min up to closing
         const halfHours = []
-        for (let h = modal.hour; h <= 21; h++) {
+        for (let hh = modal.hour; hh <= 21; hh++) {
           for (let m of [0, 30]) {
-            const totalM = h * 60 + m
+            const totalM = hh * 60 + m
             if (totalM > startTotalMins && totalM <= 21 * 60) {
-              halfHours.push({ h, m, label: `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}` })
+              halfHours.push({ h: hh, m, label: `${String(hh).padStart(2,'0')}:${String(m).padStart(2,'0')}` })
             }
           }
         }
@@ -531,18 +511,17 @@ export default function Calendar() {
               Nueva reserva · Cancha {modal.court}
             </div>
 
-            {/* Time selector */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
               <div>
                 <label className="form-label">Hora de inicio</label>
                 <select className="form-select" value={`${modal.hour}:${form.startMin||0}`}
                   onChange={e => {
-                    const [h, m] = e.target.value.split(':').map(Number)
-                    const newEnd = (form.endHour || modal.hour+1) * 60 + (form.endMin || 0)
-                    const newStart = h * 60 + m
+                    const [hv, mv] = e.target.value.split(':').map(Number)
+                    const newEnd   = (form.endHour || modal.hour+1) * 60 + (form.endMin || 0)
+                    const newStart = hv * 60 + mv
                     setForm(f => ({
-                      ...f, startMin: m,
-                      endHour: newEnd > newStart ? f.endHour : h+1,
+                      ...f, startMin: mv,
+                      endHour: newEnd > newStart ? f.endHour : hv+1,
                       endMin:  newEnd > newStart ? f.endMin  : 0,
                     }))
                   }}>
@@ -555,17 +534,16 @@ export default function Calendar() {
                 <select className="form-select"
                   value={`${form.endHour || modal.hour+1}:${form.endMin || 0}`}
                   onChange={e => {
-                    const [h, m] = e.target.value.split(':').map(Number)
-                    setForm(f => ({...f, endHour: h, endMin: m}))
+                    const [hv, mv] = e.target.value.split(':').map(Number)
+                    setForm(f => ({...f, endHour: hv, endMin: mv}))
                   }}>
-                  {halfHours.map(({h, m, label}) => (
-                    <option key={label} value={`${h}:${m}`}>{label}</option>
+                  {halfHours.map(({h: hv, m, label}) => (
+                    <option key={label} value={`${hv}:${m}`}>{label}</option>
                   ))}
                 </select>
               </div>
             </div>
 
-            {/* Duration + price preview */}
             {durationMins > 0 && (
               <div style={{ background: 'var(--glight)', border: '1px solid var(--gd)', borderRadius: 6, padding: '8px 12px', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 12, color: 'var(--g)' }}>
@@ -609,7 +587,6 @@ export default function Calendar() {
               </div>
             </div>
 
-            {/* Contadores H/M/N */}
             <div style={{ marginBottom: 10 }}>
               <label className="form-label">Personas que ingresan</label>
               <div style={{ marginTop: 6, background: 'var(--sf)', borderRadius: 8, padding: '10px 12px' }}>
@@ -645,7 +622,7 @@ export default function Calendar() {
         )
       })()}
 
-      {/* DETAIL MODAL */}
+      {/* DETAIL MODAL — tours, drills y privadas */}
       {detailModal && (
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)',
@@ -656,7 +633,6 @@ export default function Calendar() {
             borderRadius: 12, padding: 20, width: '100%', maxWidth: 480,
             maxHeight: '90vh', overflowY: 'auto'
           }}>
-            {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{
@@ -668,9 +644,7 @@ export default function Calendar() {
                   {typeColors[detailModal.type]?.label?.toUpperCase()}
                 </div>
                 <div style={{ fontFamily: 'var(--font-cond)', fontSize: 18, fontWeight: 700 }}>
-                  {detailModal.type === 'booking' ? detailModal.booking.name :
-                   detailModal.type === 'tour' ? detailModal.booking.client_name :
-                   detailModal.booking.client_name}
+                  {detailModal.type === 'booking' ? detailModal.booking.name : detailModal.booking.client_name}
                 </div>
               </div>
               <button onClick={() => { setDetailModal(null); setEditMode(false) }}
@@ -678,12 +652,11 @@ export default function Calendar() {
             </div>
 
             {!editMode ? (
-              /* VIEW MODE */
               <div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
                   {[
-                    { label: 'Fecha', val: detailModal.booking.date },
-                    { label: 'Hora', val: (() => {
+                    { label: 'Fecha',     val: detailModal.booking.date },
+                    { label: 'Hora',      val: (() => {
                       const b = detailModal.booking
                       const startMin = b.start_minute || 0
                       const startStr = `${String(b.hour).padStart(2,'0')}:${String(startMin).padStart(2,'0')}`
@@ -691,25 +664,24 @@ export default function Calendar() {
                       const totalMins = b.hour * 60 + startMin + durH * 60
                       const endH = Math.floor(totalMins / 60)
                       const endM = totalMins % 60
-                      const endStr = `${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`
-                      return `${startStr} — ${endStr}`
+                      return `${startStr} — ${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`
                     })() },
-                    { label: 'Cancha', val: `Cancha ${detailModal.booking.court}` },
+                    { label: 'Cancha',    val: `Cancha ${detailModal.booking.court}` },
                     detailModal.type === 'booking' && { label: 'Modalidad', val: detailModal.booking.modality === 'privada' ? 'Cancha privada' : 'Open Play' },
-                    detailModal.type === 'booking' && { label: 'Personas', val: detailModal.booking.people },
-                    detailModal.type === 'booking' && { label: 'Ciudad', val: detailModal.booking.city || '—' },
-                    detailModal.type === 'tour' && { label: 'Teléfono', val: detailModal.booking.client_phone || '—' },
-                    detailModal.type === 'tour' && { label: 'Hotel / Pickup', val: detailModal.booking.hotel || '—' },
+                    detailModal.type === 'booking' && { label: 'Personas',  val: detailModal.booking.people },
+                    detailModal.type === 'booking' && { label: 'Ciudad',    val: detailModal.booking.city || '—' },
+                    detailModal.type === 'tour' && { label: 'Teléfono',   val: detailModal.booking.client_phone || '—' },
+                    detailModal.type === 'tour' && { label: 'Hotel',       val: detailModal.booking.hotel || '—' },
                     detailModal.type === 'tour' && { label: 'Pickup time', val: detailModal.booking.pickup_time || '—' },
-                    detailModal.type === 'tour' && { label: 'Paquete', val: detailModal.booking.package || '—' },
-                    detailModal.type === 'tour' && { label: 'Total', val: `$${detailModal.booking.total_mxn || 0} MXN / $${detailModal.booking.total_usd || 0} USD` },
-                    detailModal.type === 'tour' && { label: 'Depósito', val: `$${detailModal.booking.deposit_mxn || 0} MXN` },
-                    detailModal.type === 'drill' && { label: 'Tipo', val: detailModal.booking.type === 'private' ? 'Privado' : 'Colectivo' },
-                    detailModal.type === 'drill' && { label: 'Personas', val: detailModal.booking.people },
-                    detailModal.type === 'drill' && { label: 'Teléfono', val: detailModal.booking.client_phone || '—' },
-                    detailModal.type === 'drill' && { label: 'Paquete', val: detailModal.booking.package_type || 'Clase suelta' },
-                    { label: 'Notas', val: detailModal.booking.notes || '—' },
-                    { label: 'Status', val: detailModal.booking.status || '—' },
+                    detailModal.type === 'tour' && { label: 'Paquete',     val: detailModal.booking.package || '—' },
+                    detailModal.type === 'tour' && { label: 'Total',       val: `$${detailModal.booking.total_mxn || 0} MXN / $${detailModal.booking.total_usd || 0} USD` },
+                    detailModal.type === 'tour' && { label: 'Depósito',    val: `$${detailModal.booking.deposit_mxn || 0} MXN` },
+                    detailModal.type === 'drill' && { label: 'Tipo',       val: detailModal.booking.type === 'private' ? 'Privado' : 'Colectivo' },
+                    detailModal.type === 'drill' && { label: 'Personas',   val: detailModal.booking.people },
+                    detailModal.type === 'drill' && { label: 'Teléfono',   val: detailModal.booking.client_phone || '—' },
+                    detailModal.type === 'drill' && { label: 'Paquete',    val: detailModal.booking.package_type || 'Clase suelta' },
+                    { label: 'Notas',     val: detailModal.booking.notes || '—' },
+                    { label: 'Status',    val: detailModal.booking.status || '—' },
                   ].filter(Boolean).map(row => (
                     <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--br)' }}>
                       <span style={{ fontSize: 12, color: 'var(--mt)', fontWeight: 600 }}>{row.label}</span>
@@ -725,9 +697,7 @@ export default function Calendar() {
                     confirmDelete === detailModal.booking.id ? (
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                         <span style={{ fontSize: 11, color: 'var(--rd)' }}>¿Confirmar?</span>
-                        <button className="btn btn-red btn-sm" onClick={() => { deleteBooking(detailModal.booking.id); setConfirmDelete(null) }}>
-                          Sí, eliminar
-                        </button>
+                        <button className="btn btn-red btn-sm" onClick={() => { deleteBooking(detailModal.booking.id); setConfirmDelete(null) }}>Sí, eliminar</button>
                         <button className="btn btn-ghost btn-sm" onClick={() => setConfirmDelete(null)}>No</button>
                       </div>
                     ) : (
@@ -738,13 +708,10 @@ export default function Calendar() {
                       </button>
                     )
                   )}
-                  <button className="btn btn-ghost btn-sm" onClick={() => { setDetailModal(null); setEditMode(false) }}>
-                    Cerrar
-                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setDetailModal(null); setEditMode(false) }}>Cerrar</button>
                 </div>
               </div>
             ) : (
-              /* EDIT MODE */
               <div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
                   <div className="form-group">
@@ -815,9 +782,9 @@ export default function Calendar() {
                     <div className="form-group">
                       <label className="form-label">Hora</label>
                       <select className="form-select" value={editForm.hour} onChange={e => setEditForm(f => ({...f, hour: e.target.value}))}>
-                        {HOURS.flatMap(h => [
-                          <option key={h} value={h}>{h}:00</option>,
-                          <option key={h+0.5} value={h+0.5}>{h}:30</option>
+                        {HOURS.flatMap(hh => [
+                          <option key={hh} value={hh}>{hh}:00</option>,
+                          <option key={hh+0.5} value={hh+0.5}>{hh}:30</option>
                         ])}
                       </select>
                     </div>
@@ -845,16 +812,75 @@ export default function Calendar() {
         </div>
       )}
 
+      {/* OPEN PLAY ROOM MODAL */}
+      {openPlayModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)',
+          zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+        }} onClick={() => setOpenPlayModal(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 500 }}>
+            <OpenPlayRoomModal
+              booking={openPlayModal}
+              onUpdate={async (id, updates) => {
+                const { data, error } = await supabase
+                  .from('bookings')
+                  .update(updates)
+                  .eq('id', id)
+                  .select()
+                  .single()
+                if (!error) {
+                  setBookings(prev => prev.map(b => b.id === id ? data : b))
+                  setOpenPlayModal(prev => ({ ...prev, ...updates }))
+                  setNotif('Sala actualizada')
+                }
+                return { data, error }
+              }}
+              onStartPlay={async (id) => {
+                const updates = { status: 'playing', started_at: new Date().toISOString() }
+                const { data, error } = await supabase
+                  .from('bookings')
+                  .update(updates)
+                  .eq('id', id)
+                  .select()
+                  .single()
+                if (!error) {
+                  setBookings(prev => prev.map(b => b.id === id ? data : b))
+                  setOpenPlayModal(prev => ({ ...prev, ...updates }))
+                  setNotif('¡Sala en juego! Base congelada')
+                }
+                return { data, error }
+              }}
+              onFinish={async (id) => {
+                const updates = { status: 'finished', finished_at: new Date().toISOString() }
+                const { data, error } = await supabase
+                  .from('bookings')
+                  .update(updates)
+                  .eq('id', id)
+                  .select()
+                  .single()
+                if (!error) {
+                  setBookings(prev => prev.map(b => b.id === id ? data : b))
+                  setNotif('Sala cerrada — revenue sumado al reporte')
+                  setOpenPlayModal(null)
+                }
+                return { data, error }
+              }}
+              onClose={() => setOpenPlayModal(null)}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Day summary */}
       <div className="card" style={{ marginTop: 12, display: 'flex', gap: 20, flexWrap: 'wrap' }}>
         {[
-          { label: 'RESERVAS', val: dayBookings.length + dayTours.length + dayDrills.length },
-          { label: 'PRIVADAS', val: dayBookings.filter(b => b.modality === 'privada').length },
-          { label: 'OPEN PLAY', val: dayBookings.filter(b => b.modality === 'openplay').length },
-          { label: 'TOURS D&D', val: dayTours.length },
-          { label: 'DRILLS', val: dayDrills.length },
+          { label: 'RESERVAS',      val: dayBookings.length + dayTours.length + dayDrills.length },
+          { label: 'PRIVADAS',      val: dayBookings.filter(b => b.modality === 'privada').length },
+          { label: 'OPEN PLAY',     val: dayBookings.filter(b => b.modality === 'openplay').length },
+          { label: 'TOURS D&D',     val: dayTours.length },
+          { label: 'DRILLS',        val: dayDrills.length },
           { label: 'PERSONAS EST.', val: dayBookings.reduce((a, b) => a + (b.people||0), 0) },
-          { label: 'INGRESO EST.', val: fmtMXN(dayRevenue) },
+          { label: 'INGRESO EST.',  val: fmtMXN(dayRevenue) },
         ].map(s => (
           <div key={s.label}>
             <div style={{ fontSize: 10, color: 'var(--mt)', letterSpacing: '.05em' }}>{s.label}</div>
@@ -863,14 +889,14 @@ export default function Calendar() {
         ))}
       </div>
 
-      {/* UPCOMING BOOKINGS LIST */}
+      {/* Upcoming bookings */}
       {upcomingAll.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <div style={{ fontFamily: 'var(--font-cond)', fontSize: 15, fontWeight: 700, color: 'var(--mt)', letterSpacing: '.05em', marginBottom: 8 }}>
             PRÓXIMAS RESERVAS — {selectedDay === today ? 'HOY' : selectedDay}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {upcomingAll.map((b, i) => {
+            {upcomingAll.map((b) => {
               const tc = typeColors[b._type] || typeColors.booking
               return (
                 <div key={`${b._type}-${b.id}`}
@@ -893,17 +919,17 @@ export default function Calendar() {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontFamily: 'var(--font-cond)', fontSize: 14, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {b.name}
+                      {b._type === 'booking' && b.modality === 'openplay' ? `👥 ${b.name}` : b.name}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--mt)' }}>
-                      Cancha {b.court} · {tc.label}
-                      {b._type === 'booking' && ` · ${b.people}p · ${b.city || ''}`}
+                      Cancha {b.court} · {b._type === 'booking' && b.modality === 'openplay' ? `Open Play · ${b.people}p · $${b.revenue} MXN` : tc.label}
+                      {b._type === 'booking' && b.modality !== 'openplay' && ` · ${b.people}p · ${b.city || ''}`}
                       {b._type === 'tour' && ` · ${b.package} · ${b.hotel?.substring(0,20) || ''}`}
                       {b._type === 'drill' && ` · ${b.type === 'private' ? 'Privado' : 'Colectivo'}`}
                     </div>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--mt)', flexShrink: 0 }}>
-                    ✏️ Ver / Editar
+                    {b._type === 'booking' && b.modality === 'openplay' ? '👥 Ver sala' : '✏️ Ver / Editar'}
                   </div>
                 </div>
               )
