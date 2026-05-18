@@ -18,7 +18,7 @@ export default function Calendar() {
   const [bookings, setBookings] = useState([])
   const [tourBookings, setTourBookings] = useState([])
   const [drillBookings, setDrillBookings] = useState([])
-  const [modal, setModal] = useState(null)
+  const [modal, setModal] = useState(null) // { hour, court } — inline form trigger
   const [detailModal, setDetailModal] = useState(null)
   const [openPlayModal, setOpenPlayModal] = useState(null)
   const [editMode, setEditMode] = useState(false)
@@ -86,7 +86,6 @@ export default function Calendar() {
   }
 
   function openDetail(booking, type) {
-    // Si es open play, abrir el modal de sala dedicado
     if (type === 'booking' && booking.modality === 'openplay') {
       setOpenPlayModal(booking)
       return
@@ -129,36 +128,24 @@ export default function Calendar() {
       const revenue = calcRev(dur * 60)
       const people  = parseInt(editForm.gender_m||0) + parseInt(editForm.gender_f||0) + parseInt(editForm.gender_k||0) || parseInt(editForm.people)
       await supabase.from('bookings').update({
-        name:         editForm.name,
-        city:         editForm.city,
-        people,
-        gender_m:     parseInt(editForm.gender_m || 0),
-        gender_f:     parseInt(editForm.gender_f || 0),
-        gender_k:     parseInt(editForm.gender_k || 0),
-        notes:        editForm.notes,
-        hour:         editHour,
-        start_minute: editMinute,
-        court:        parseInt(editForm.court),
-        duration:     dur,
-        revenue,
+        name: editForm.name, city: editForm.city, people,
+        gender_m: parseInt(editForm.gender_m || 0),
+        gender_f: parseInt(editForm.gender_f || 0),
+        gender_k: parseInt(editForm.gender_k || 0),
+        notes: editForm.notes, hour: editHour, start_minute: editMinute,
+        court: parseInt(editForm.court), duration: dur, revenue,
       }).eq('id', booking.id)
     } else if (type === 'tour') {
       await supabase.from('tour_bookings').update({
-        client_name:  editForm.name,
-        client_phone: editForm.client_phone,
-        hotel:        editForm.hotel,
-        hour:         parseInt(editForm.hour),
-        court:        parseInt(editForm.court),
-        notes:        editForm.notes,
+        client_name: editForm.name, client_phone: editForm.client_phone,
+        hotel: editForm.hotel, hour: parseInt(editForm.hour),
+        court: parseInt(editForm.court), notes: editForm.notes,
       }).eq('id', booking.id)
     } else if (type === 'drill') {
       await supabase.from('drills').update({
-        client_name:  editForm.name,
-        client_phone: editForm.client_phone,
-        hour:         parseInt(editForm.hour),
-        court:        parseInt(editForm.court),
-        notes:        editForm.notes,
-        people:       parseInt(editForm.people),
+        client_name: editForm.name, client_phone: editForm.client_phone,
+        hour: parseInt(editForm.hour), court: parseInt(editForm.court),
+        notes: editForm.notes, people: parseInt(editForm.people),
       }).eq('id', booking.id)
     }
 
@@ -200,22 +187,12 @@ export default function Calendar() {
     setSaving(true)
     const totalPeople = (form.gM||0) + (form.gF||0) + (form.gK||0) || form.people
     const { data, error } = await supabase.from('bookings').insert({
-      date:         selectedDay,
-      hour,
-      court,
-      modality:     form.modality,
-      duration:     durationHours,
-      start_minute: startMin,
-      name:         form.name.trim(),
-      city:         form.city.trim() || null,
-      people:       totalPeople,
-      gender_m:     form.gM || 0,
-      gender_f:     form.gF || 0,
-      gender_k:     form.gK || 0,
-      notes:        form.notes.trim() || null,
-      status:       'reserved',
-      revenue,
-      created_by:   profile?.id
+      date: selectedDay, hour, court, modality: form.modality,
+      duration: durationHours, start_minute: startMin,
+      name: form.name.trim(), city: form.city.trim() || null,
+      people: totalPeople, gender_m: form.gM || 0, gender_f: form.gF || 0,
+      gender_k: form.gK || 0, notes: form.notes.trim() || null,
+      status: 'reserved', revenue, created_by: profile?.id
     }).select().single()
 
     if (error) { setError(error.message); setSaving(false); return }
@@ -241,28 +218,157 @@ export default function Calendar() {
 
   const currentHour  = new Date().getHours()
   const upcomingAll  = [
-    ...dayBookings.filter(b => b.date > today || (b.date === today && b.hour >= currentHour))
-      .map(b => ({ ...b, _type: 'booking' })),
-    ...dayTours.filter(b => b.date > today || (b.date === today && b.hour >= currentHour))
-      .map(b => ({ ...b, _type: 'tour', name: b.client_name })),
-    ...dayDrills.filter(b => b.date > today || (b.date === today && b.hour >= currentHour))
-      .map(b => ({ ...b, _type: 'drill', name: b.client_name })),
+    ...dayBookings.filter(b => b.date > today || (b.date === today && b.hour >= currentHour)).map(b => ({ ...b, _type: 'booking' })),
+    ...dayTours.filter(b => b.date > today || (b.date === today && b.hour >= currentHour)).map(b => ({ ...b, _type: 'tour', name: b.client_name })),
+    ...dayDrills.filter(b => b.date > today || (b.date === today && b.hour >= currentHour)).map(b => ({ ...b, _type: 'drill', name: b.client_name })),
   ].sort((a, b) => a.hour - b.hour)
 
   const typeColors = {
     booking: { bg: '#1a2e0d', border: 'var(--gd)', text: 'var(--g)', label: 'Cancha' },
     tour:    { bg: '#2e1a0d', border: '#8a4a1e',   text: '#e8a87c', label: 'Tour D&D' },
-    drill:   { bg: '#1e1535', border: '#6b3fa0',   text: '#c8a8f0', label: 'Drill' },
+    drill:   { bg: '#1e1535', border: '#6b3fa0',   text: '#c8a8f0', label: 'Drill / Clase' },
+  }
+
+  // ── Inline form renderer ──────────────────────────────────────────────────
+  function renderInlineForm(h, court) {
+    const startTotalMins = h * 60 + (form.startMin || 0)
+    const endTotalMins   = (form.endHour || h+1) * 60 + (form.endMin || 0)
+    const durationMins   = endTotalMins - startTotalMins
+    const durationHours  = durationMins / 60
+
+    function calcRev(mod, durMins, ppl) {
+      if (mod === 'openplay') return 200 * ppl
+      if (durMins <= 60)  return 400
+      if (durMins <= 90)  return 600
+      if (durMins <= 120) return 750
+      if (durMins <= 150) return 950
+      return 400 + Math.ceil((durMins - 60) / 30) * 200
+    }
+    const revenue = calcRev(form.modality, durationMins, form.people)
+
+    const halfHours = []
+    for (let hh = h; hh <= 21; hh++) {
+      for (let m of [0, 30]) {
+        const totalM = hh * 60 + m
+        if (totalM > startTotalMins && totalM <= 21 * 60) {
+          halfHours.push({ h: hh, m, label: `${String(hh).padStart(2,'0')}:${String(m).padStart(2,'0')}` })
+        }
+      }
+    }
+
+    return (
+      <div style={{
+        gridColumn: `1 / -1`,
+        background: 'var(--cd)', border: '1px solid var(--gd)',
+        borderRadius: 10, padding: 14, marginTop: 4,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <div style={{ fontFamily: 'var(--font-cond)', fontSize: 16, fontWeight: 700 }}>
+            Nueva reserva · Cancha {court} · {String(h).padStart(2,'0')}:00
+          </div>
+          <button onClick={() => { setModal(null); setError('') }}
+            style={{ background: 'none', border: 'none', color: 'var(--mt)', fontSize: 18, cursor: 'pointer' }}>×</button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+          <div>
+            <label className="form-label">Hora inicio</label>
+            <select className="form-select" value={`${h}:${form.startMin||0}`}
+              onChange={e => {
+                const [hv, mv] = e.target.value.split(':').map(Number)
+                setForm(f => ({ ...f, startMin: mv, endHour: f.endHour || hv+1, endMin: f.endMin || 0 }))
+              }}>
+              <option value={`${h}:0`}>{String(h).padStart(2,'0')}:00</option>
+              <option value={`${h}:30`}>{String(h).padStart(2,'0')}:30</option>
+            </select>
+          </div>
+          <div>
+            <label className="form-label">Hora fin</label>
+            <select className="form-select" value={`${form.endHour || h+1}:${form.endMin || 0}`}
+              onChange={e => {
+                const [hv, mv] = e.target.value.split(':').map(Number)
+                setForm(f => ({...f, endHour: hv, endMin: mv}))
+              }}>
+              {halfHours.map(({h: hv, m, label}) => (
+                <option key={label} value={`${hv}:${m}`}>{label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {durationMins > 0 && (
+          <div style={{ background: 'var(--glight)', border: '1px solid var(--gd)', borderRadius: 6, padding: '6px 10px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: 'var(--g)' }}>{durationMins} min</span>
+            <span style={{ fontFamily: 'var(--font-cond)', fontSize: 16, fontWeight: 700, color: 'var(--g)' }}>${revenue} MXN</span>
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+          <div>
+            <label className="form-label">Modalidad</label>
+            <select className="form-select" value={form.modality}
+              onChange={e => setForm(f => ({...f, modality: e.target.value, endHour: e.target.value === 'openplay' ? h+3 : f.endHour, endMin: 0}))}>
+              <option value="privada">Cancha privada</option>
+              <option value="openplay">Open Play · $200/p · 3h</option>
+            </select>
+          </div>
+          <div>
+            <label className="form-label">Personas</label>
+            <input className="form-input" type="number" min="1" max="12" value={form.people}
+              onChange={e => setForm(f => ({...f, people: +e.target.value}))} />
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+          <div>
+            <label className="form-label">Nombre *</label>
+            <input className="form-input" value={form.name}
+              onChange={e => setForm(f => ({...f, name: e.target.value}))} placeholder="Nombre del cliente" autoFocus />
+          </div>
+          <div>
+            <label className="form-label">Ciudad</label>
+            <input className="form-input" value={form.city}
+              onChange={e => setForm(f => ({...f, city: e.target.value}))} placeholder="Cancún..." />
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 8 }}>
+          <label className="form-label">Personas (H/M/N)</label>
+          <div style={{ display: 'flex', gap: 12, background: 'var(--sf)', borderRadius: 7, padding: '8px 10px' }}>
+            {[['H','gM'],['M','gF'],['N','gK']].map(([lbl, key]) => (
+              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ fontSize: 11, color: 'var(--mt)', minWidth: 12 }}>{lbl}</span>
+                <button type="button" className="btn btn-ghost btn-sm" style={{ width: 24, height: 24, padding: 0 }}
+                  onClick={e => { e.stopPropagation(); setForm(f => ({...f, [key]: Math.max(0, (f[key]||0) - 1)})) }}>−</button>
+                <span style={{ fontFamily: 'var(--font-cond)', fontSize: 16, fontWeight: 700, minWidth: 18, textAlign: 'center' }}>{form[key] || 0}</span>
+                <button type="button" className="btn btn-ghost btn-sm" style={{ width: 24, height: 24, padding: 0 }}
+                  onClick={e => { e.stopPropagation(); setForm(f => ({...f, [key]: (f[key]||0) + 1})) }}>+</button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 10 }}>
+          <label className="form-label">Notas</label>
+          <input className="form-input" value={form.notes}
+            onChange={e => setForm(f => ({...f, notes: e.target.value}))} placeholder="Cumpleaños, grupo especial..." />
+        </div>
+
+        {error && <div style={{ background: '#2e0d0d', border: '1px solid #5a1a1a', color: 'var(--rd)', borderRadius: 6, padding: '7px 10px', fontSize: 12, marginBottom: 8 }}>{error}</div>}
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-green" onClick={saveBooking} disabled={saving}>{saving ? 'Guardando...' : 'Guardar reserva'}</button>
+          <button className="btn btn-ghost" onClick={() => { setModal(null); setError('') }}>Cancelar</button>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div>
       {notif && (
-        <div onClick={() => setNotif('')} style={{
-          background: 'var(--glight)', border: '1px solid var(--gd)', color: 'var(--g)',
-          borderRadius: 7, padding: '8px 12px', marginBottom: 10,
-          display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer'
-        }}>
+        <div onClick={() => setNotif('')} style={{ background: 'var(--glight)', border: '1px solid var(--gd)', color: 'var(--g)', borderRadius: 7, padding: '8px 12px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
           <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--g)' }} />
           {notif}
         </div>
@@ -286,20 +392,10 @@ export default function Calendar() {
           const isToday  = ds === today
           const isActive = ds === selectedDay
           return (
-            <div key={ds} onClick={() => setSelectedDay(ds)} style={{
-              flex: 1, background: isActive ? 'var(--g)' : 'var(--sf)',
-              border: `1px solid ${isActive ? 'var(--g)' : isToday ? 'var(--am)' : 'var(--br)'}`,
-              borderRadius: 8, padding: '7px 4px', textAlign: 'center', cursor: 'pointer'
-            }}>
-              <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: isActive ? '#0d1f00' : isToday ? 'var(--am)' : 'var(--mt)' }}>
-                {DAYS_ES[d.getDay()]}
-              </div>
-              <div style={{ fontFamily: 'var(--font-cond)', fontSize: 20, fontWeight: 700, color: isActive ? '#0d1f00' : 'var(--tx)' }}>
-                {d.getDate()}
-              </div>
-              <div style={{ fontSize: 10, color: isActive ? '#1a3d00' : 'var(--mt)' }}>
-                {count ? `${count} res.` : ''}
-              </div>
+            <div key={ds} onClick={() => setSelectedDay(ds)} style={{ flex: 1, background: isActive ? 'var(--g)' : 'var(--sf)', border: `1px solid ${isActive ? 'var(--g)' : isToday ? 'var(--am)' : 'var(--br)'}`, borderRadius: 8, padding: '7px 4px', textAlign: 'center', cursor: 'pointer' }}>
+              <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: isActive ? '#0d1f00' : isToday ? 'var(--am)' : 'var(--mt)' }}>{DAYS_ES[d.getDay()]}</div>
+              <div style={{ fontFamily: 'var(--font-cond)', fontSize: 20, fontWeight: 700, color: isActive ? '#0d1f00' : 'var(--tx)' }}>{d.getDate()}</div>
+              <div style={{ fontSize: 10, color: isActive ? '#1a3d00' : 'var(--mt)' }}>{count ? `${count} res.` : ''}</div>
             </div>
           )
         })}
@@ -310,13 +406,7 @@ export default function Calendar() {
         <span style={{ fontSize: 11, color: 'var(--mt)' }}>Ver:</span>
         {[0,1,2,3,4].map(n => (
           <button key={n} onClick={() => setCourtFilter(n)}
-            style={{
-              fontFamily: 'var(--font-cond)', fontSize: 12, padding: '3px 10px',
-              borderRadius: 5, border: '1px solid var(--br)', cursor: 'pointer',
-              background: courtFilter === n ? 'var(--bl)' : 'transparent',
-              color: courtFilter === n ? '#fff' : 'var(--mt)',
-              borderColor: courtFilter === n ? 'var(--bl)' : 'var(--br)'
-            }}>
+            style={{ fontFamily: 'var(--font-cond)', fontSize: 12, padding: '3px 10px', borderRadius: 5, border: '1px solid var(--br)', cursor: 'pointer', background: courtFilter === n ? 'var(--bl)' : 'transparent', color: courtFilter === n ? '#fff' : 'var(--mt)', borderColor: courtFilter === n ? 'var(--bl)' : 'var(--br)' }}>
             {n === 0 ? 'Todas' : `Cancha ${n}`}
           </button>
         ))}
@@ -341,9 +431,7 @@ export default function Calendar() {
       {/* Court headers */}
       <div style={{ display: 'flex', marginLeft: 52, gap: 3, marginBottom: 4 }}>
         {visibleCourts.map(c => (
-          <div key={c} style={{ flex: 1, fontFamily: 'var(--font-cond)', fontSize: 12, fontWeight: 600, color: 'var(--mt)', textAlign: 'center', letterSpacing: '.05em' }}>
-            Cancha {c}
-          </div>
+          <div key={c} style={{ flex: 1, fontFamily: 'var(--font-cond)', fontSize: 12, fontWeight: 600, color: 'var(--mt)', textAlign: 'center', letterSpacing: '.05em' }}>Cancha {c}</div>
         ))}
       </div>
 
@@ -351,6 +439,8 @@ export default function Calendar() {
       {HOURS.map(h => {
         const isPastDay  = selectedDay < today
         const isPastHour = isPastDay || (selectedDay === today && h < new Date().getHours())
+        const isModalOpen = modal && modal.hour === h
+
         return (
           <div key={h}>
             <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 40 }}>
@@ -368,46 +458,25 @@ export default function Calendar() {
 
                   if (tourBooking) {
                     return (
-                      <div key={court} onClick={() => openDetail(tourBooking, 'tour')} style={{
-                        background: '#2e1a0d', border: '1px solid #8a4a1e',
-                        borderRadius: '5px 5px 0 0', borderBottom: 'none',
-                        padding: '4px 6px', overflow: 'hidden', cursor: 'pointer',
-                      }}>
-                        <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: '#e8a87c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          🏓 {tourBooking.client_name}
-                        </div>
-                        <div style={{ fontSize: 10, color: 'var(--mt)' }}>
-                          {tourBooking.package} · {tourBooking.hotel?.substring(0, 15)}
-                        </div>
+                      <div key={court} onClick={() => openDetail(tourBooking, 'tour')} style={{ background: '#2e1a0d', border: '1px solid #8a4a1e', borderRadius: '5px 5px 0 0', borderBottom: 'none', padding: '4px 6px', overflow: 'hidden', cursor: 'pointer' }}>
+                        <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: '#e8a87c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🏓 {tourBooking.client_name}</div>
+                        <div style={{ fontSize: 10, color: 'var(--mt)' }}>{tourBooking.package} · {tourBooking.hotel?.substring(0, 15)}</div>
                       </div>
                     )
                   }
 
                   if (drillBooking) {
                     return (
-                      <div key={court} onClick={() => openDetail(drillBooking, 'drill')} style={{
-                        background: '#1e1535', border: '1px solid #6b3fa0',
-                        borderRadius: 5, padding: '4px 6px', overflow: 'hidden', cursor: 'pointer',
-                      }}>
-                        <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: '#c8a8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          🎯 {drillBooking.client_name}
-                        </div>
-                        <div style={{ fontSize: 10, color: 'var(--mt)' }}>
-                          {drillBooking.type === 'private' ? 'Privado' : 'Colectivo'}
-                        </div>
+                      <div key={court} onClick={() => openDetail(drillBooking, 'drill')} style={{ background: '#1e1535', border: '1px solid #6b3fa0', borderRadius: 5, padding: '4px 6px', overflow: 'hidden', cursor: 'pointer' }}>
+                        <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: '#c8a8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🎯 {drillBooking.client_name}</div>
+                        <div style={{ fontSize: 10, color: 'var(--mt)' }}>{drillBooking.type === 'private' ? 'Privado' : 'Colectivo'}</div>
                       </div>
                     )
                   }
 
                   if (isTourContinuation) {
                     const isLast = h === blocker.hour + TOUR_HOURS - 1
-                    return (
-                      <div key={court} style={{
-                        background: '#2e1a0d', border: '1px solid #8a4a1e',
-                        borderTop: 'none', borderRadius: isLast ? '0 0 5px 5px' : 0,
-                        borderBottom: isLast ? undefined : 'none', minHeight: 36
-                      }} />
-                    )
+                    return <div key={court} style={{ background: '#2e1a0d', border: '1px solid #8a4a1e', borderTop: 'none', borderRadius: isLast ? '0 0 5px 5px' : 0, borderBottom: isLast ? undefined : 'none', minHeight: 36 }} />
                   }
 
                   if (booking) {
@@ -421,7 +490,7 @@ export default function Calendar() {
                         padding: '4px 6px', position: 'relative', overflow: 'hidden',
                         opacity: isPastHour && !isOP ? .6 : 1, cursor: 'pointer',
                       }}>
-                        <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: isOP ? 'var(--bl)' : 'var(--g)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: isOP ? '#7eb8f7' : 'var(--g)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {isOP ? `👥 ${booking.name}` : booking.name}
                         </div>
                         <div style={{ fontSize: 10, color: 'var(--mt)' }}>
@@ -436,10 +505,8 @@ export default function Calendar() {
                                 style={{ background: '#444', border: 'none', borderRadius: 3, padding: '1px 5px', color: '#fff', fontSize: 9, cursor: 'pointer' }}>✗</button>
                             </div>
                           ) : (
-                            <button
-                              onClick={e => { e.stopPropagation(); setConfirmDelete(booking.id) }}
-                              style={{ position: 'absolute', top: 3, right: 3, background: 'var(--rd)', border: 'none', borderRadius: 3, width: 14, height: 14, color: '#fff', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                            >×</button>
+                            <button onClick={e => { e.stopPropagation(); setConfirmDelete(booking.id) }}
+                              style={{ position: 'absolute', top: 3, right: 3, background: 'var(--rd)', border: 'none', borderRadius: 3, width: 14, height: 14, color: '#fff', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
                           )
                         )}
                       </div>
@@ -449,12 +516,7 @@ export default function Calendar() {
                   if (isOPContinuation) {
                     const isLast = h === blocker.hour + OPENPLAY_HOURS - 1
                     return (
-                      <div key={court} onClick={() => openDetail(blocker, 'booking')} style={{
-                        background: '#0d1e35', border: '1px solid #1e4a8a',
-                        borderTop: 'none', borderRadius: isLast ? '0 0 5px 5px' : 0,
-                        borderBottom: isLast ? undefined : 'none', minHeight: 36,
-                        cursor: 'pointer',
-                      }} />
+                      <div key={court} onClick={() => openDetail(blocker, 'booking')} style={{ background: '#0d1e35', border: '1px solid #1e4a8a', borderTop: 'none', borderRadius: isLast ? '0 0 5px 5px' : 0, borderBottom: isLast ? undefined : 'none', minHeight: 36, cursor: 'pointer' }} />
                     )
                   }
 
@@ -464,13 +526,22 @@ export default function Calendar() {
 
                   return (
                     <div key={court}
-                      onClick={() => { setModal({ hour: h, court }); setForm({ name:'', city:'', modality:'privada', people:2, gM:0, gF:0, gK:0, notes:'', startMin:0, endHour:h+1, endMin:0 }); setError('') }}
+                      onClick={() => {
+                        setModal({ hour: h, court })
+                        setForm({ name:'', city:'', modality:'privada', people:2, gM:0, gF:0, gK:0, notes:'', startMin:0, endHour:h+1, endMin:0 })
+                        setError('')
+                      }}
                       style={{ background: 'var(--sf)', border: '1px solid var(--br)', borderRadius: 5, minHeight: 36, cursor: 'pointer', transition: 'all .15s' }}
                       onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--g)'; e.currentTarget.style.background = '#1e2a14' }}
                       onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--br)'; e.currentTarget.style.background = 'var(--sf)' }}
                     />
                   )
                 })}
+
+                {/* ── INLINE FORM — se despliega en la fila de la hora seleccionada ── */}
+                {isModalOpen && modal.court && visibleCourts.includes(modal.court) && (
+                  renderInlineForm(h, modal.court)
+                )}
               </div>
             </div>
             <div style={{ height: 1, background: 'var(--br)', margin: '1px 0 1px 52px', opacity: .35 }} />
@@ -478,177 +549,20 @@ export default function Calendar() {
         )
       })}
 
-      {/* Add booking modal */}
-      {modal && (() => {
-        const startTotalMins = modal.hour * 60 + (form.startMin || 0)
-        const endTotalMins   = (form.endHour || modal.hour+1) * 60 + (form.endMin || 0)
-        const durationMins   = endTotalMins - startTotalMins
-        const durationHours  = durationMins / 60
-
-        function calcRev(mod, durMins, ppl) {
-          if (mod === 'openplay') return 200 * ppl
-          if (durMins <= 60)  return 400
-          if (durMins <= 90)  return 600
-          if (durMins <= 120) return 750
-          if (durMins <= 150) return 950
-          return 400 + Math.ceil((durMins - 60) / 30) * 200
-        }
-        const revenue = calcRev(form.modality, durationMins, form.people)
-
-        const halfHours = []
-        for (let hh = modal.hour; hh <= 21; hh++) {
-          for (let m of [0, 30]) {
-            const totalM = hh * 60 + m
-            if (totalM > startTotalMins && totalM <= 21 * 60) {
-              halfHours.push({ h: hh, m, label: `${String(hh).padStart(2,'0')}:${String(m).padStart(2,'0')}` })
-            }
-          }
-        }
-
-        return (
-          <div style={{ marginTop: 14, background: 'var(--cd)', border: '1px solid var(--br)', borderRadius: 10, padding: 16 }}>
-            <div style={{ fontFamily: 'var(--font-cond)', fontSize: 18, fontWeight: 700, marginBottom: 12 }}>
-              Nueva reserva · Cancha {modal.court}
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-              <div>
-                <label className="form-label">Hora de inicio</label>
-                <select className="form-select" value={`${modal.hour}:${form.startMin||0}`}
-                  onChange={e => {
-                    const [hv, mv] = e.target.value.split(':').map(Number)
-                    const newEnd   = (form.endHour || modal.hour+1) * 60 + (form.endMin || 0)
-                    const newStart = hv * 60 + mv
-                    setForm(f => ({
-                      ...f, startMin: mv,
-                      endHour: newEnd > newStart ? f.endHour : hv+1,
-                      endMin:  newEnd > newStart ? f.endMin  : 0,
-                    }))
-                  }}>
-                  <option value={`${modal.hour}:0`}>{String(modal.hour).padStart(2,'0')}:00</option>
-                  <option value={`${modal.hour}:30`}>{String(modal.hour).padStart(2,'0')}:30</option>
-                </select>
-              </div>
-              <div>
-                <label className="form-label">Hora de fin</label>
-                <select className="form-select"
-                  value={`${form.endHour || modal.hour+1}:${form.endMin || 0}`}
-                  onChange={e => {
-                    const [hv, mv] = e.target.value.split(':').map(Number)
-                    setForm(f => ({...f, endHour: hv, endMin: mv}))
-                  }}>
-                  {halfHours.map(({h: hv, m, label}) => (
-                    <option key={label} value={`${hv}:${m}`}>{label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {durationMins > 0 && (
-              <div style={{ background: 'var(--glight)', border: '1px solid var(--gd)', borderRadius: 6, padding: '8px 12px', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 12, color: 'var(--g)' }}>
-                  {durationMins} min ({durationHours % 1 === 0 ? durationHours : durationHours.toFixed(1)} h)
-                </span>
-                <span style={{ fontFamily: 'var(--font-cond)', fontSize: 16, fontWeight: 700, color: 'var(--g)' }}>
-                  ${revenue} MXN
-                </span>
-              </div>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-              <div>
-                <label className="form-label">Modalidad</label>
-                <select className="form-select" value={form.modality}
-                  onChange={e => setForm(f => ({...f, modality: e.target.value,
-                    endHour: e.target.value === 'openplay' ? modal.hour+3 : f.endHour,
-                    endMin: 0
-                  }))}>
-                  <option value="privada">Cancha privada</option>
-                  <option value="openplay">Open Play · $200/p · 3h</option>
-                </select>
-              </div>
-              <div>
-                <label className="form-label">Personas</label>
-                <input className="form-input" type="number" min="1" max="12" value={form.people}
-                  onChange={e => setForm(f => ({...f, people: +e.target.value}))} />
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-              <div>
-                <label className="form-label">Nombre</label>
-                <input className="form-input" value={form.name}
-                  onChange={e => setForm(f => ({...f, name: e.target.value}))} placeholder="Nombre del cliente" />
-              </div>
-              <div>
-                <label className="form-label">Ciudad</label>
-                <input className="form-input" value={form.city}
-                  onChange={e => setForm(f => ({...f, city: e.target.value}))} placeholder="Cancún..." />
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 10 }}>
-              <label className="form-label">Personas que ingresan</label>
-              <div style={{ marginTop: 6, background: 'var(--sf)', borderRadius: 8, padding: '10px 12px' }}>
-                {[['Hombres','gM'],['Mujeres','gF'],['Niños','gK']].map(([lbl, key]) => (
-                  <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <div style={{ fontSize: 12, color: 'var(--mt)', minWidth: 56 }}>{lbl}</div>
-                    <button type="button" className="btn btn-ghost btn-sm"
-                      style={{ width: 28, height: 28, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      onClick={e => { e.stopPropagation(); setForm(f => ({...f, [key]: Math.max(0, (f[key]||0) - 1)})) }}>−</button>
-                    <div style={{ fontFamily: 'var(--font-cond)', fontSize: 18, fontWeight: 700, minWidth: 24, textAlign: 'center' }}>
-                      {form[key] || 0}
-                    </div>
-                    <button type="button" className="btn btn-ghost btn-sm"
-                      style={{ width: 28, height: 28, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      onClick={e => { e.stopPropagation(); setForm(f => ({...f, [key]: (f[key]||0) + 1})) }}>+</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 10 }}>
-              <label className="form-label">Notas</label>
-              <input className="form-input" value={form.notes}
-                onChange={e => setForm(f => ({...f, notes: e.target.value}))} placeholder="Cumpleaños, grupo especial..." />
-            </div>
-
-            {error && <div style={{ background: '#2e0d0d', border: '1px solid #5a1a1a', color: 'var(--rd)', borderRadius: 6, padding: '7px 12px', fontSize: 12, marginBottom: 10 }}>{error}</div>}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-green" onClick={saveBooking} disabled={saving}>{saving ? 'Guardando...' : 'Guardar reserva'}</button>
-              <button className="btn btn-ghost" onClick={() => setModal(null)}>Cancelar</button>
-            </div>
-          </div>
-        )
-      })()}
-
       {/* DETAIL MODAL — tours, drills y privadas */}
       {detailModal && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)',
-          zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
-        }} onClick={() => { setDetailModal(null); setEditMode(false) }}>
-          <div onClick={e => e.stopPropagation()} style={{
-            background: 'var(--cd)', border: `1px solid ${typeColors[detailModal.type]?.border || 'var(--br)'}`,
-            borderRadius: 12, padding: 20, width: '100%', maxWidth: 480,
-            maxHeight: '90vh', overflowY: 'auto'
-          }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => { setDetailModal(null); setEditMode(false) }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--cd)', border: `1px solid ${typeColors[detailModal.type]?.border || 'var(--br)'}`, borderRadius: 12, padding: 20, width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{
-                  fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 4,
-                  background: typeColors[detailModal.type]?.bg,
-                  color: typeColors[detailModal.type]?.text,
-                  letterSpacing: '.04em'
-                }}>
+                <div style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 4, background: typeColors[detailModal.type]?.bg, color: typeColors[detailModal.type]?.text, letterSpacing: '.04em' }}>
                   {typeColors[detailModal.type]?.label?.toUpperCase()}
                 </div>
                 <div style={{ fontFamily: 'var(--font-cond)', fontSize: 18, fontWeight: 700 }}>
                   {detailModal.type === 'booking' ? detailModal.booking.name : detailModal.booking.client_name}
                 </div>
               </div>
-              <button onClick={() => { setDetailModal(null); setEditMode(false) }}
-                style={{ background: 'none', border: 'none', color: 'var(--mt)', fontSize: 20, cursor: 'pointer' }}>×</button>
+              <button onClick={() => { setDetailModal(null); setEditMode(false) }} style={{ background: 'none', border: 'none', color: 'var(--mt)', fontSize: 20, cursor: 'pointer' }}>×</button>
             </div>
 
             {!editMode ? (
@@ -690,9 +604,7 @@ export default function Calendar() {
                   ))}
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-green btn-sm" onClick={() => setEditMode(true)} style={{ flex: 1, justifyContent: 'center' }}>
-                    ✏️ Editar
-                  </button>
+                  <button className="btn btn-green btn-sm" onClick={() => setEditMode(true)} style={{ flex: 1, justifyContent: 'center' }}>✏️ Editar</button>
                   {detailModal.type === 'booking' && (
                     confirmDelete === detailModal.booking.id ? (
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -701,11 +613,7 @@ export default function Calendar() {
                         <button className="btn btn-ghost btn-sm" onClick={() => setConfirmDelete(null)}>No</button>
                       </div>
                     ) : (
-                      <button className="btn btn-ghost btn-sm"
-                        onClick={() => setConfirmDelete(detailModal.booking.id)}
-                        style={{ color: 'var(--rd)', borderColor: 'var(--rd)' }}>
-                        🗑 Eliminar
-                      </button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setConfirmDelete(detailModal.booking.id)} style={{ color: 'var(--rd)', borderColor: 'var(--rd)' }}>🗑 Eliminar</button>
                     )
                   )}
                   <button className="btn btn-ghost btn-sm" onClick={() => { setDetailModal(null); setEditMode(false) }}>Cerrar</button>
@@ -720,37 +628,22 @@ export default function Calendar() {
                   </div>
                   {detailModal.type === 'tour' && (
                     <>
-                      <div className="form-group">
-                        <label className="form-label">Teléfono</label>
-                        <input className="form-input" value={editForm.client_phone} onChange={e => setEditForm(f => ({...f, client_phone: e.target.value}))} />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">Hotel / Pickup</label>
-                        <input className="form-input" value={editForm.hotel} onChange={e => setEditForm(f => ({...f, hotel: e.target.value}))} />
-                      </div>
+                      <div className="form-group"><label className="form-label">Teléfono</label><input className="form-input" value={editForm.client_phone} onChange={e => setEditForm(f => ({...f, client_phone: e.target.value}))} /></div>
+                      <div className="form-group"><label className="form-label">Hotel / Pickup</label><input className="form-input" value={editForm.hotel} onChange={e => setEditForm(f => ({...f, hotel: e.target.value}))} /></div>
                     </>
                   )}
                   {detailModal.type === 'booking' && (
                     <>
-                      <div className="form-group">
-                        <label className="form-label">Ciudad</label>
-                        <input className="form-input" value={editForm.city} onChange={e => setEditForm(f => ({...f, city: e.target.value}))} />
-                      </div>
+                      <div className="form-group"><label className="form-label">Ciudad</label><input className="form-input" value={editForm.city} onChange={e => setEditForm(f => ({...f, city: e.target.value}))} /></div>
                       <div className="form-group">
                         <label className="form-label">Personas que ingresan</label>
                         <div style={{ background: 'var(--sf)', borderRadius: 8, padding: '8px 12px', marginTop: 4 }}>
                           {[['Hombres','gender_m'],['Mujeres','gender_f'],['Niños','gender_k']].map(([lbl,key]) => (
                             <div key={key} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
                               <div style={{ fontSize:12, color:'var(--mt)', minWidth:56 }}>{lbl}</div>
-                              <button type="button" className="btn btn-ghost btn-sm"
-                                style={{ width:26,height:26,padding:0,display:'flex',alignItems:'center',justifyContent:'center' }}
-                                onClick={() => setEditForm(f => ({...f, [key]: Math.max(0,(f[key]||0)-1)}))}>−</button>
-                              <div style={{ fontFamily:'var(--font-cond)',fontSize:16,fontWeight:700,minWidth:20,textAlign:'center' }}>
-                                {editForm[key] || 0}
-                              </div>
-                              <button type="button" className="btn btn-ghost btn-sm"
-                                style={{ width:26,height:26,padding:0,display:'flex',alignItems:'center',justifyContent:'center' }}
-                                onClick={() => setEditForm(f => ({...f, [key]: (f[key]||0)+1}))}>+</button>
+                              <button type="button" className="btn btn-ghost btn-sm" style={{ width:26,height:26,padding:0,display:'flex',alignItems:'center',justifyContent:'center' }} onClick={() => setEditForm(f => ({...f, [key]: Math.max(0,(f[key]||0)-1)}))}>−</button>
+                              <div style={{ fontFamily:'var(--font-cond)',fontSize:16,fontWeight:700,minWidth:20,textAlign:'center' }}>{editForm[key] || 0}</div>
+                              <button type="button" className="btn btn-ghost btn-sm" style={{ width:26,height:26,padding:0,display:'flex',alignItems:'center',justifyContent:'center' }} onClick={() => setEditForm(f => ({...f, [key]: (f[key]||0)+1}))}>+</button>
                             </div>
                           ))}
                         </div>
@@ -768,24 +661,15 @@ export default function Calendar() {
                   )}
                   {detailModal.type === 'drill' && (
                     <>
-                      <div className="form-group">
-                        <label className="form-label">Teléfono</label>
-                        <input className="form-input" value={editForm.client_phone} onChange={e => setEditForm(f => ({...f, client_phone: e.target.value}))} />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">Personas</label>
-                        <input className="form-input" type="number" min="1" max="4" value={editForm.people} onChange={e => setEditForm(f => ({...f, people: e.target.value}))} />
-                      </div>
+                      <div className="form-group"><label className="form-label">Teléfono</label><input className="form-input" value={editForm.client_phone} onChange={e => setEditForm(f => ({...f, client_phone: e.target.value}))} /></div>
+                      <div className="form-group"><label className="form-label">Personas</label><input className="form-input" type="number" min="1" max="4" value={editForm.people} onChange={e => setEditForm(f => ({...f, people: e.target.value}))} /></div>
                     </>
                   )}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <div className="form-group">
                       <label className="form-label">Hora</label>
                       <select className="form-select" value={editForm.hour} onChange={e => setEditForm(f => ({...f, hour: e.target.value}))}>
-                        {HOURS.flatMap(hh => [
-                          <option key={hh} value={hh}>{hh}:00</option>,
-                          <option key={hh+0.5} value={hh+0.5}>{hh}:30</option>
-                        ])}
+                        {HOURS.flatMap(hh => [<option key={hh} value={hh}>{hh}:00</option>, <option key={hh+0.5} value={hh+0.5}>{hh}:30</option>])}
                       </select>
                     </div>
                     <div className="form-group">
@@ -795,15 +679,10 @@ export default function Calendar() {
                       </select>
                     </div>
                   </div>
-                  <div className="form-group">
-                    <label className="form-label">Notas</label>
-                    <input className="form-input" value={editForm.notes} onChange={e => setEditForm(f => ({...f, notes: e.target.value}))} placeholder="Notas..." />
-                  </div>
+                  <div className="form-group"><label className="form-label">Notas</label><input className="form-input" value={editForm.notes} onChange={e => setEditForm(f => ({...f, notes: e.target.value}))} placeholder="Notas..." /></div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-green btn-sm" onClick={saveEdit} disabled={savingEdit} style={{ flex: 1, justifyContent: 'center' }}>
-                    {savingEdit ? 'Guardando...' : '✅ Guardar cambios'}
-                  </button>
+                  <button className="btn btn-green btn-sm" onClick={saveEdit} disabled={savingEdit} style={{ flex: 1, justifyContent: 'center' }}>{savingEdit ? 'Guardando...' : '✅ Guardar cambios'}</button>
                   <button className="btn btn-ghost btn-sm" onClick={() => setEditMode(false)}>Cancelar</button>
                 </div>
               </div>
@@ -814,58 +693,42 @@ export default function Calendar() {
 
       {/* OPEN PLAY ROOM MODAL */}
       {openPlayModal && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)',
-          zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
-        }} onClick={() => setOpenPlayModal(null)}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setOpenPlayModal(null)}>
           <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 500 }}>
             <OpenPlayRoomModal
               booking={openPlayModal}
               onUpdate={async (id, updates) => {
-                const { data, error } = await supabase
-                  .from('bookings')
-                  .update(updates)
-                  .eq('id', id)
-                  .select()
-                  .single()
-                if (!error) {
-                  setBookings(prev => prev.map(b => b.id === id ? data : b))
-                  setOpenPlayModal(prev => ({ ...prev, ...updates }))
-                  setNotif('Sala actualizada')
-                }
+                const { data, error } = await supabase.from('bookings').update(updates).eq('id', id).select().single()
+                if (!error) { setBookings(prev => prev.map(b => b.id === id ? data : b)); setOpenPlayModal(prev => ({ ...prev, ...updates })); setNotif('Sala actualizada') }
                 return { data, error }
               }}
               onStartPlay={async (id) => {
                 const updates = { status: 'playing', started_at: new Date().toISOString() }
-                const { data, error } = await supabase
-                  .from('bookings')
-                  .update(updates)
-                  .eq('id', id)
-                  .select()
-                  .single()
-                if (!error) {
-                  setBookings(prev => prev.map(b => b.id === id ? data : b))
-                  setOpenPlayModal(prev => ({ ...prev, ...updates }))
-                  setNotif('¡Sala en juego! Base congelada')
-                }
+                const { data, error } = await supabase.from('bookings').update(updates).eq('id', id).select().single()
+                if (!error) { setBookings(prev => prev.map(b => b.id === id ? data : b)); setOpenPlayModal(prev => ({ ...prev, ...updates })); setNotif('¡Sala en juego! Base congelada') }
                 return { data, error }
               }}
               onFinish={async (id) => {
                 const updates = { status: 'finished', finished_at: new Date().toISOString() }
-                const { data, error } = await supabase
-                  .from('bookings')
-                  .update(updates)
-                  .eq('id', id)
-                  .select()
-                  .single()
-                if (!error) {
-                  setBookings(prev => prev.map(b => b.id === id ? data : b))
-                  setNotif('Sala cerrada — revenue sumado al reporte')
-                  setOpenPlayModal(null)
-                }
+                const { data, error } = await supabase.from('bookings').update(updates).eq('id', id).select().single()
+                if (!error) { setBookings(prev => prev.map(b => b.id === id ? data : b)); setNotif('Sala cerrada — revenue sumado al reporte'); setOpenPlayModal(null) }
                 return { data, error }
               }}
               onClose={() => setOpenPlayModal(null)}
+              onDelete={async (id) => {
+                if (confirmDelete === id) {
+                  await supabase.from('bookings').delete().eq('id', id)
+                  const b = bookings.find(x => x.id === id)
+                  setBookings(prev => prev.filter(x => x.id !== id))
+                  setNotif(`Sala eliminada — ${b?.name}`)
+                  setOpenPlayModal(null)
+                  setConfirmDelete(null)
+                } else {
+                  setConfirmDelete(id)
+                }
+              }}
+              confirmDelete={confirmDelete}
+              onCancelDelete={() => setConfirmDelete(null)}
             />
           </div>
         </div>
@@ -901,20 +764,12 @@ export default function Calendar() {
               return (
                 <div key={`${b._type}-${b.id}`}
                   onClick={() => openDetail(b, b._type)}
-                  style={{
-                    background: 'var(--cd)', border: `1px solid var(--br)`,
-                    borderLeft: `3px solid ${tc.text}`,
-                    borderRadius: 8, padding: '10px 14px',
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    cursor: 'pointer', transition: 'all .15s',
-                  }}
+                  style={{ background: 'var(--cd)', border: `1px solid var(--br)`, borderLeft: `3px solid ${tc.text}`, borderRadius: 8, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', transition: 'all .15s' }}
                   onMouseEnter={e => e.currentTarget.style.borderColor = tc.text}
                   onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--br)'}
                 >
                   <div style={{ minWidth: 44, textAlign: 'center' }}>
-                    <div style={{ fontFamily: 'var(--font-cond)', fontSize: 18, fontWeight: 800, color: tc.text }}>
-                      {String(b.hour).padStart(2,'0')}
-                    </div>
+                    <div style={{ fontFamily: 'var(--font-cond)', fontSize: 18, fontWeight: 800, color: tc.text }}>{String(b.hour).padStart(2,'0')}</div>
                     <div style={{ fontSize: 9, color: 'var(--mt)' }}>:00</div>
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
