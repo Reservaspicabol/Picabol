@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react'
 import { fetchBookingsRange } from '../hooks/useBookings'
 import { supabase } from '../lib/supabase'
 import { getWeekDays, ymd, fmtMXN, DAYS_ES, MONTHS_ES } from '../lib/utils'
-import { format, startOfMonth, endOfMonth } from 'date-fns'
+import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns'
 
 const PERIODS = [
-  { key: 'hoy',    label: 'Hoy' },
-  { key: 'semana', label: 'Esta semana' },
-  { key: 'mes',    label: 'Este mes' },
+  { key: 'hoy',          label: 'Hoy' },
+  { key: 'semana',       label: 'Esta semana' },
+  { key: 'mes',          label: 'Este mes' },
+  { key: 'mes_anterior', label: 'Mes anterior' },
+  { key: 'custom',       label: 'Rango' },
 ]
 
 export default function Ventas() {
@@ -16,24 +18,42 @@ export default function Ventas() {
   const [tourBookings,  setTourBookings]  = useState([])
   const [drillBookings, setDrillBookings] = useState([])
   const [loading,       setLoading]       = useState(true)
+  const [customFrom,    setCustomFrom]    = useState('')
+  const [customTo,      setCustomTo]      = useState('')
+  const [activeLabel,   setActiveLabel]   = useState('Esta semana')
 
-  useEffect(() => { loadData() }, [period])
+  useEffect(() => { if (period !== 'custom') loadData() }, [period])
 
   async function loadData() {
     setLoading(true)
     const today = new Date()
-    let from, to
+    let from, to, label
 
     if (period === 'hoy') {
       from = to = format(today, 'yyyy-MM-dd')
+      label = 'Hoy'
     } else if (period === 'semana') {
       const days = getWeekDays(0)
-      from = ymd(days[0])
-      to   = ymd(days[6])
-    } else {
-      from = format(startOfMonth(today), 'yyyy-MM-dd')
-      to   = format(endOfMonth(today),   'yyyy-MM-dd')
+      from  = ymd(days[0])
+      to    = ymd(days[6])
+      label = 'Esta semana'
+    } else if (period === 'mes') {
+      from  = format(startOfMonth(today), 'yyyy-MM-dd')
+      to    = format(endOfMonth(today),   'yyyy-MM-dd')
+      label = 'Este mes'
+    } else if (period === 'mes_anterior') {
+      const prevMonth = subMonths(today, 1)
+      from  = format(startOfMonth(prevMonth), 'yyyy-MM-dd')
+      to    = format(endOfMonth(prevMonth),   'yyyy-MM-dd')
+      label = format(prevMonth, 'MMMM yyyy').replace(/^\w/, c => c.toUpperCase())
+    } else if (period === 'custom') {
+      if (!customFrom || !customTo) { setLoading(false); return }
+      from  = customFrom
+      to    = customTo
+      label = `${customFrom} → ${customTo}`
     }
+
+    setActiveLabel(label)
 
     const [b, t, d] = await Promise.all([
       fetchBookingsRange(from, to),
@@ -64,7 +84,6 @@ export default function Ventas() {
   }, 0)
 
   // ── Drill stats ───────────────────────────────────────────────────────
-  // Solo suma drills con revenue_collected=true y que NO sean pago previo al sistema
   const drillRevMXN = drillBookings
     .filter(b => b.revenue_collected && !b.pre_system_payment)
     .reduce((a, b) => a + Number(b.total_mxn || 0), 0)
@@ -149,7 +168,7 @@ export default function Ventas() {
 
   function exportExcelGeneral(period) {
     const now = new Date()
-    const periodLabel = period === 'hoy' ? 'Hoy' : period === 'semana' ? 'Semana' : 'Mes'
+    const periodLabel = activeLabel
 
     const courtRows = finished.map(b => [
       b.date, String(b.hour).padStart(2,'0') + ':00', b.name, '—', b.city || '—',
@@ -176,14 +195,14 @@ export default function Ventas() {
     const url       = URL.createObjectURL(blob)
     const a         = document.createElement('a')
     a.href          = url
-    a.download      = 'picabol-reporte-' + periodLabel + '-' + now.toISOString().slice(0,10) + '.csv'
+    a.download      = 'picabol-reporte-' + periodLabel.replace(/\s/g,'_') + '-' + now.toISOString().slice(0,10) + '.csv'
     a.click()
     URL.revokeObjectURL(url)
   }
 
   function exportPDFGeneral(period) {
     const now = new Date()
-    const periodLabel = period === 'hoy' ? 'Hoy' : period === 'semana' ? 'Esta Semana' : 'Este Mes'
+    const periodLabel = activeLabel
 
     const allRows = [
       ...finished.map(b => ({
@@ -267,8 +286,10 @@ export default function Ventas() {
   return (
     <div>
       {/* Period selector */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 16, alignItems: 'center' }}>
-        <span style={{ fontFamily: 'var(--font-cond)', fontSize: 20, fontWeight: 700, marginRight: 8 }}>Ventas</span>
+      <div style={{ display: 'flex', gap: 6, marginBottom: period === 'custom' ? 8 : 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontFamily: 'var(--font-cond)', fontSize: 20, fontWeight: 700, marginRight: 8 }}>
+          Ventas
+        </span>
         {PERIODS.map(p => (
           <button key={p.key} onClick={() => setPeriod(p.key)}
             style={{
@@ -280,7 +301,39 @@ export default function Ventas() {
               fontWeight:   period === p.key ? 700 : 400
             }}>{p.label}</button>
         ))}
+        {activeLabel && period !== 'custom' && (
+          <span style={{ fontSize: 12, color: 'var(--mt)', marginLeft: 4, fontStyle: 'italic' }}>
+            {activeLabel}
+          </span>
+        )}
       </div>
+
+      {/* Custom range inputs — only shown when 'Rango' is selected */}
+      {period === 'custom' && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+          <label style={{ fontSize: 12, color: 'var(--mt)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            Desde
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+              style={{ fontFamily: 'var(--font-cond)', fontSize: 13, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--br)', background: 'var(--bg2)', color: 'var(--fg)' }} />
+          </label>
+          <label style={{ fontSize: 12, color: 'var(--mt)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            Hasta
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+              style={{ fontFamily: 'var(--font-cond)', fontSize: 13, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--br)', background: 'var(--bg2)', color: 'var(--fg)' }} />
+          </label>
+          <button
+            onClick={loadData}
+            disabled={!customFrom || !customTo}
+            style={{
+              fontFamily: 'var(--font-cond)', fontSize: 13, padding: '5px 14px',
+              borderRadius: 6, border: 'none', cursor: customFrom && customTo ? 'pointer' : 'not-allowed',
+              background: customFrom && customTo ? 'var(--g)' : 'var(--br)',
+              color: '#0d1f00', fontWeight: 700, opacity: customFrom && customTo ? 1 : 0.5
+            }}>
+            Aplicar
+          </button>
+        </div>
+      )}
 
       {/* Export buttons */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
