@@ -74,6 +74,9 @@ export default function Ventas() {
   const openRev  = opens.reduce((a, b) => a + Number(b.revenue || 0), 0)
   const courtRev = privRev + openRev
 
+  // ── Reservas del sitio web aun no efectivas (solo para historial, NO suman a ventas) ──
+  const pendingWeb = bookings.filter(b => b.status === 'reserved' && b.notes?.includes('SITIO WEB PUBLICO'))
+
   // ── Tour stats ────────────────────────────────────────────────────────
   const confirmedTours = tourBookings.filter(b => b.status === 'confirmed')
   const tourRevMXN     = tourBookings.reduce((a, b) => a + Number(b.total_mxn || 0), 0)
@@ -578,7 +581,7 @@ export default function Ventas() {
         <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: 'var(--mt)', letterSpacing: '.07em', marginBottom: 12 }}>
           ÚLTIMAS TRANSACCIONES
         </div>
-        {(finished.length + tourBookings.length + drillBookings.length) === 0 ? (
+        {(finished.length + pendingWeb.length + tourBookings.length + drillBookings.length) === 0 ? (
           <div style={{ fontSize: 13, color: 'var(--mt)' }}>Sin transacciones para este período</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -592,6 +595,7 @@ export default function Ventas() {
             <tbody>
               {[
                 ...finished.map(b => ({ ...b, _type: 'court' })),
+                ...pendingWeb.map(b => ({ ...b, _type: 'pending_web' })),
                 ...tourBookings.map(b => ({ ...b, _type: 'tour', name: b.client_name, revenue: b.total_mxn, people: (parseInt(b.package)||2) + (b.extra_pax||0), city: b.hotel })),
                 ...drillBookings
                   .filter(b => b.revenue_collected && !b.pre_system_payment)
@@ -600,27 +604,27 @@ export default function Ventas() {
                 .sort((a, b) => b.date?.localeCompare(a.date))
                 .slice(0, 20)
                 .map((b, idx) => (
-                  <tr key={`${b._type}-${b.id}-${idx}`}>
+                  <tr key={`${b._type}-${b.id}-${idx}`} style={b._type === 'pending_web' ? { opacity: .75 } : undefined}>
                     <td style={{ fontSize: 12, color: 'var(--mt)', padding: '7px 6px', borderTop: '1px solid var(--br)' }}>{b.date}</td>
                     <td style={{ fontSize: 12, color: 'var(--mt)', padding: '7px 6px', borderTop: '1px solid var(--br)' }}>{b.hour}:00</td>
                     <td style={{ fontSize: 12, fontWeight: 500, padding: '7px 6px', borderTop: '1px solid var(--br)' }}>
-                      {b._type === 'tour' ? `🏓 ${b.name}` : b.modality === 'openplay' ? `👥 ${b.name}` : b.name}
+                      {b._type === 'tour' ? `🏓 ${b.name}` : b._type === 'pending_web' ? `🌐 ${b.name}` : b.modality === 'openplay' ? `👥 ${b.name}` : b.name}
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--mt)', padding: '7px 6px', borderTop: '1px solid var(--br)' }}>C{b.court}</td>
                     <td style={{ padding: '7px 6px', borderTop: '1px solid var(--br)' }}>
                       <span style={{
                         display: 'inline-block', fontFamily: 'var(--font-cond)', fontSize: 11, fontWeight: 600,
                         padding: '2px 8px', borderRadius: 4,
-                        background: b._type === 'drill' ? '#1e1535' : b._type === 'tour' ? '#1a2e10' : b.modality === 'privada' ? 'var(--glight)' : '#0d1e35',
-                        color:      b._type === 'drill' ? '#c8a8f0' : b._type === 'tour' ? '#c8e86b' : b.modality === 'privada' ? 'var(--g)' : 'var(--bl)'
+                        background: b._type === 'pending_web' ? '#3a2e0d' : b._type === 'drill' ? '#1e1535' : b._type === 'tour' ? '#1a2e10' : b.modality === 'privada' ? 'var(--glight)' : '#0d1e35',
+                        color:      b._type === 'pending_web' ? 'var(--am)' : b._type === 'drill' ? '#c8a8f0' : b._type === 'tour' ? '#c8e86b' : b.modality === 'privada' ? 'var(--g)' : 'var(--bl)'
                       }}>
-                        {b._type === 'drill' ? `Drill ${b.modality}` : b._type === 'tour' ? `Tour ${b.package}` : b.modality === 'privada' ? 'Privada' : 'Open Play'}
+                        {b._type === 'pending_web' ? `Pendiente (Web)${b.modality === 'openplay' ? ' · Open Play' : ''}` : b._type === 'drill' ? `Drill ${b.modality}` : b._type === 'tour' ? `Tour ${b.package}` : b.modality === 'privada' ? 'Privada' : 'Open Play'}
                       </span>
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--mt)', padding: '7px 6px', borderTop: '1px solid var(--br)' }}>{b.people}p</td>
                     <td style={{ fontSize: 12, color: 'var(--mt)', padding: '7px 6px', borderTop: '1px solid var(--br)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.city || '—'}</td>
                     <td style={{ fontFamily: 'var(--font-cond)', fontSize: 14, fontWeight: 700, padding: '7px 6px', borderTop: '1px solid var(--br)',
-                      color: b._type === 'drill' ? '#c8a8f0' : b._type === 'tour' ? '#c8e86b' : 'var(--g)' }}>
+                      color: b._type === 'pending_web' ? 'var(--am)' : b._type === 'drill' ? '#c8a8f0' : b._type === 'tour' ? '#c8e86b' : 'var(--g)' }}>
                       {fmtMXN(b.revenue)}
                     </td>
                   </tr>
