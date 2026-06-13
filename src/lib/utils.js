@@ -2,6 +2,8 @@ import { format, startOfWeek, addDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 
 export const HOURS = Array.from({ length: 15 }, (_, i) => i + 7)   // 7–21
+// Slots de 30 minutos: 7:00, 7:30, 8:00 ... 21:00
+export const SLOTS = HOURS.flatMap(h => [{ hour: h, minute: 0 }, { hour: h, minute: 30 }])
 export const COURTS = [1, 2, 3, 4]
 export const DAYS_ES = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb']
 export const MONTHS_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
@@ -81,3 +83,19 @@ export function isSlotBlocked(bookings, date, court, hour) {
   }
   return null
 }
+
+// Convierte hour+minute a un indice continuo de slots de 30min (7:00 = 0, 7:30 = 1, 8:00 = 2...)
+export function toSlotIndex(hour, minute = 0) {
+  return (hour - 7) * 2 + (minute === 30 ? 1 : 0)
+}
+
+// Cuantos slots de 30min ocupa una reserva segun su tipo/duracion
+export function durationSlots(item, kind = 'booking') {
+  if (kind === 'tour') return TOUR_HOURS_SLOTS
+  if (kind === 'drill') return 2 // 1 hora = 2 slots
+  if (item.modality === 'openplay') return OPENPLAY_HOURS * 2
+  const hours = parseFloat(item.duration) || 1
+  return Math.round(hours * 2)
+}
+
+export const TOUR_HOURS_SLOTS = 6 // 3 horas = 6 slots de 30min

@@ -4,11 +4,12 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import OpenPlayRoomModal from '../components/OpenPlayRoomModal'
 import {
-  HOURS, COURTS, DAYS_ES, MONTHS_ES, OPENPLAY_HOURS,
-  getWeekDays, ymd, todayStr, isSlotBlocked, fmtMXN
+  HOURS, SLOTS, COURTS, DAYS_ES, MONTHS_ES, OPENPLAY_HOURS,
+  getWeekDays, ymd, todayStr, fmtMXN,
+  toSlotIndex, durationSlots
 } from '../lib/utils'
 
-const TOUR_HOURS = 3
+const TOUR_HOURS_SLOTS = 6
 
 export default function Calendar() {
   const { profile } = useAuth()
@@ -68,19 +69,32 @@ export default function Calendar() {
   const visibleCourts = courtFilter === 0 ? COURTS : [courtFilter]
   const today = todayStr()
 
-  function isSlotBlockedAll(date, court, hour) {
+  // Resuelve que ocupa un slot de 30min dado (slotIdx) en una cancha/dia.
+  // Devuelve { item, kind, startSlot, spanSlots, isStart, isEnd } o null si esta libre.
+  function getSlotOccupant(date, court, slotIdx) {
     for (const b of bookings) {
       if (b.date !== date || b.court !== court) continue
-      const slots = b.modality === 'openplay' ? OPENPLAY_HOURS : (b.duration || 1)
-      if (hour >= b.hour && hour < b.hour + slots) return { ...b, type: 'booking' }
+      const startSlot = toSlotIndex(b.hour, b.start_minute || 0)
+      const spanSlots = durationSlots(b, 'booking')
+      if (slotIdx >= startSlot && slotIdx < startSlot + spanSlots) {
+        return { item: b, kind: 'booking', startSlot, spanSlots, isStart: slotIdx === startSlot, isEnd: slotIdx === startSlot + spanSlots - 1 }
+      }
     }
     for (const b of tourBookings) {
       if (b.date !== date || b.court !== court) continue
-      if (hour >= b.hour && hour < b.hour + TOUR_HOURS) return { ...b, type: 'tour', name: b.client_name, modality: 'tour' }
+      const startSlot = toSlotIndex(b.hour, 0)
+      const spanSlots = TOUR_HOURS_SLOTS
+      if (slotIdx >= startSlot && slotIdx < startSlot + spanSlots) {
+        return { item: { ...b, name: b.client_name, modality: 'tour' }, kind: 'tour', startSlot, spanSlots, isStart: slotIdx === startSlot, isEnd: slotIdx === startSlot + spanSlots - 1 }
+      }
     }
     for (const b of drillBookings) {
       if (b.date !== date || b.court !== court) continue
-      if (hour >= b.hour && hour < b.hour + 1) return { ...b, type: 'drill', name: b.client_name, modality: 'drill' }
+      const startSlot = toSlotIndex(b.hour, 0)
+      const spanSlots = 2 // 1 hora
+      if (slotIdx >= startSlot && slotIdx < startSlot + spanSlots) {
+        return { item: { ...b, name: b.client_name, modality: 'drill' }, kind: 'drill', startSlot, spanSlots, isStart: slotIdx === startSlot, isEnd: slotIdx === startSlot + spanSlots - 1 }
+      }
     }
     return null
   }
@@ -166,10 +180,15 @@ export default function Calendar() {
 
     if (durationMins <= 0) return setError('La hora de fin debe ser después de la hora de inicio')
 
-    const slotsToCheck = form.modality === 'openplay' ? OPENPLAY_HOURS : Math.ceil(durationMins / 60)
-    for (let i = 0; i < slotsToCheck; i++) {
-      if (isSlotBlockedAll(selectedDay, court, hour + i)) {
-        return setError(`Conflicto en Cancha ${court} a las ${hour + i}:00`)
+    // Validacion exacta por slots de 30min (cubre reservas que empiezan/duran en medias horas)
+    const newStartSlot = toSlotIndex(hour, startMin)
+    const newSpanSlots = form.modality === 'openplay' ? OPENPLAY_HOURS * 2 : Math.round(durationMins / 30)
+    for (let s = newStartSlot; s < newStartSlot + newSpanSlots; s++) {
+      if (s >= SLOTS.length) return setError(`La reserva excede el horario disponible (hasta ${SLOTS[SLOTS.length - 1].hour}:${String(SLOTS[SLOTS.length - 1].minute).padStart(2,'0')})`)
+      const occ = getSlotOccupant(selectedDay, court, s)
+      if (occ) {
+        const slot = SLOTS[s]
+        return setError(`Conflicto en Cancha ${court} a las ${String(slot.hour).padStart(2,'0')}:${String(slot.minute).padStart(2,'0')}`)
       }
     }
 
@@ -230,9 +249,9 @@ export default function Calendar() {
   }
 
   // ── Inline form renderer ──────────────────────────────────────────────────
-  function renderInlineForm(h, court) {
-    const startTotalMins = h * 60 + (form.startMin || 0)
-    const endTotalMins   = (form.endHour || h+1) * 60 + (form.endMin || 0)
+  function renderInlineForm(h, court, startMinute = 0) {
+    const startTotalMins = h * 60 + (form.startMin ?? startMinute)
+    const endTotalMins   = (form.endHour || h+1) * 60 + (form.endMin ?? 0)
     const durationMins   = endTotalMins - startTotalMins
     const durationHours  = durationMins / 60
 
@@ -258,14 +277,14 @@ export default function Calendar() {
 
     return (
       <div style={{
-        gridColumn: `1 / -1`,
+        position: 'relative', zIndex: 50,
         background: 'var(--cd)', border: '1px solid var(--gd)',
         borderRadius: 10, padding: 14, marginTop: 4,
         boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <div style={{ fontFamily: 'var(--font-cond)', fontSize: 16, fontWeight: 700 }}>
-            Nueva reserva · Cancha {court} · {String(h).padStart(2,'0')}:00
+            Nueva reserva · Cancha {court} · {String(h).padStart(2,'0')}:{String(startMinute).padStart(2,'0')}
           </div>
           <button onClick={() => { setModal(null); setError('') }}
             style={{ background: 'none', border: 'none', color: 'var(--mt)', fontSize: 18, cursor: 'pointer' }}>×</button>
@@ -435,119 +454,148 @@ export default function Calendar() {
         ))}
       </div>
 
-      {/* Timeline */}
-      {HOURS.map(h => {
-        const isPastDay  = selectedDay < today
-        const isPastHour = isPastDay || (selectedDay === today && h < new Date().getHours())
-        const isModalOpen = modal && modal.hour === h
+      {/* Timeline — grid unico con filas de 30min, las reservas ocupan varias filas */}
+      {(() => {
+        const ROW_H = 20 // alto de cada fila de 30min
+        const isPastDay = selectedDay < today
+        const nowH = new Date().getHours()
+        const nowM = new Date().getMinutes()
+        const nowSlot = toSlotIndex(nowH, nowM >= 30 ? 30 : 0)
+
+        // Track de celdas ya "consumidas" por un span (para no re-renderizar continuaciones)
+        const consumed = {} // `${court}-${slotIdx}` => true
 
         return (
-          <div key={h}>
-            <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 40 }}>
-              <div style={{ width: 48, flexShrink: 0, fontSize: 11, color: 'var(--mt)', paddingTop: 4, textAlign: 'right', paddingRight: 8, fontFamily: 'var(--font-cond)' }}>
-                {h}:00
-              </div>
-              <div style={{ flex: 1, display: 'grid', gridTemplateColumns: `repeat(${visibleCourts.length}, 1fr)`, gap: 3 }}>
-                {visibleCourts.map(court => {
-                  const booking      = bookings.find(b => b.date === selectedDay && b.court === court && b.hour === h)
-                  const tourBooking  = tourBookings.find(b => b.date === selectedDay && b.court === court && b.hour === h)
-                  const drillBooking = drillBookings.find(b => b.date === selectedDay && b.court === court && b.hour === h)
-                  const blocker      = !booking && !tourBooking && !drillBooking ? isSlotBlockedAll(selectedDay, court, h) : null
-                  const isOPContinuation   = blocker && blocker.modality === 'openplay' && blocker.hour !== h
-                  const isTourContinuation = blocker && blocker.type === 'tour' && blocker.hour !== h
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: `48px repeat(${visibleCourts.length}, 1fr)`,
+            gridTemplateRows: `repeat(${SLOTS.length}, ${ROW_H}px)`,
+            columnGap: 3,
+          }}>
+            {SLOTS.map((slot, slotIdx) => {
+              const isHourMark = slot.minute === 0
+              const isPastSlot = isPastDay || (selectedDay === today && slotIdx < nowSlot)
+              return (
+                <div key={`label-${slotIdx}`} style={{
+                  gridColumn: 1, gridRow: slotIdx + 1,
+                  fontSize: isHourMark ? 11 : 9,
+                  color: isHourMark ? 'var(--mt)' : 'var(--br)',
+                  textAlign: 'right', paddingRight: 8,
+                  fontFamily: 'var(--font-cond)',
+                  borderTop: isHourMark ? '1px solid var(--br)' : '1px dashed var(--br)',
+                  borderTopColor: isHourMark ? 'var(--br)' : 'rgba(255,255,255,.06)',
+                  display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end',
+                  opacity: isHourMark ? 1 : 0.5,
+                }}>
+                  {isHourMark ? `${slot.hour}:00` : ''}
+                </div>
+              )
+            })}
 
-                  if (tourBooking) {
-                    return (
-                      <div key={court} onClick={() => openDetail(tourBooking, 'tour')} style={{ background: '#2e1a0d', border: '1px solid #8a4a1e', borderRadius: '5px 5px 0 0', borderBottom: 'none', padding: '4px 6px', overflow: 'hidden', cursor: 'pointer' }}>
-                        <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: '#e8a87c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🏓 {tourBooking.client_name}</div>
-                        <div style={{ fontSize: 10, color: 'var(--mt)' }}>{tourBooking.package} · {tourBooking.hotel?.substring(0, 15)}</div>
-                      </div>
-                    )
-                  }
+            {visibleCourts.map((court, ci) => (
+              SLOTS.map((slot, slotIdx) => {
+                const key = `${court}-${slotIdx}`
+                if (consumed[key]) return null
 
-                  if (drillBooking) {
-                    return (
-                      <div key={court} onClick={() => openDetail(drillBooking, 'drill')} style={{ background: '#1e1535', border: '1px solid #6b3fa0', borderRadius: 5, padding: '4px 6px', overflow: 'hidden', cursor: 'pointer' }}>
-                        <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: '#c8a8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🎯 {drillBooking.client_name}</div>
-                        <div style={{ fontSize: 10, color: 'var(--mt)' }}>{drillBooking.type === 'private' ? 'Privado' : 'Colectivo'}</div>
-                      </div>
-                    )
-                  }
+                const isHourMark = slot.minute === 0
+                const isPastSlot = isPastDay || (selectedDay === today && slotIdx < nowSlot)
+                const occ = getSlotOccupant(selectedDay, court, slotIdx)
+                const isModalOpen = modal && modal.court === court && modal.slotIdx === slotIdx
 
-                  if (isTourContinuation) {
-                    const isLast = h === blocker.hour + TOUR_HOURS - 1
-                    return <div key={court} style={{ background: '#2e1a0d', border: '1px solid #8a4a1e', borderTop: 'none', borderRadius: isLast ? '0 0 5px 5px' : 0, borderBottom: isLast ? undefined : 'none', minHeight: 36 }} />
-                  }
+                const baseStyle = {
+                  gridColumn: ci + 2,
+                  borderTop: isHourMark ? '1px solid var(--br)' : '1px dashed rgba(255,255,255,.06)',
+                }
 
-                  if (booking) {
-                    const isOP = booking.modality === 'openplay'
-                    return (
-                      <div key={court} onClick={() => openDetail(booking, 'booking')} style={{
-                        background: isOP ? '#0d1e35' : isPastHour ? '#1e1e1e' : '#1a2e0d',
-                        border: `1px solid ${isOP ? '#1e4a8a' : isPastHour ? '#2a2a2a' : 'var(--gd)'}`,
-                        borderRadius: isOP ? '5px 5px 0 0' : 5,
-                        borderBottom: isOP ? 'none' : undefined,
-                        padding: '4px 6px', position: 'relative', overflow: 'hidden',
-                        opacity: isPastHour && !isOP ? .6 : 1, cursor: 'pointer',
-                      }}>
-                        <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: isOP ? '#7eb8f7' : 'var(--g)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {isOP ? `👥 ${booking.name}` : booking.name}
-                        </div>
-                        <div style={{ fontSize: 10, color: 'var(--mt)' }}>
-                          {isOP ? `${booking.people}p · $${booking.revenue} MXN` : `${booking.people}p${booking.city ? ` · ${booking.city}` : ''}`}
-                        </div>
-                        {!isPastHour && (
-                          confirmDelete === booking.id ? (
-                            <div style={{ position: 'absolute', top: 2, right: 2, display: 'flex', gap: 2, background: 'var(--cd)', borderRadius: 4, padding: 2, zIndex: 10 }}>
-                              <button onClick={e => { e.stopPropagation(); deleteBooking(booking.id); setConfirmDelete(null) }}
-                                style={{ background: 'var(--rd)', border: 'none', borderRadius: 3, padding: '1px 5px', color: '#fff', fontSize: 9, cursor: 'pointer' }}>✓</button>
-                              <button onClick={e => { e.stopPropagation(); setConfirmDelete(null) }}
-                                style={{ background: '#444', border: 'none', borderRadius: 3, padding: '1px 5px', color: '#fff', fontSize: 9, cursor: 'pointer' }}>✗</button>
-                            </div>
-                          ) : (
-                            <button onClick={e => { e.stopPropagation(); setConfirmDelete(booking.id) }}
-                              style={{ position: 'absolute', top: 3, right: 3, background: 'var(--rd)', border: 'none', borderRadius: 3, width: 14, height: 14, color: '#fff', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
-                          )
-                        )}
-                      </div>
-                    )
-                  }
+                if (occ) {
+                  // marca como consumidas todas las filas que ocupa este bloque
+                  for (let s = occ.startSlot; s < occ.startSlot + occ.spanSlots; s++) consumed[`${court}-${s}`] = true
+                  if (!occ.isStart) return null // las filas de continuacion no rendean nada (ya consumidas)
 
-                  if (isOPContinuation) {
-                    const isLast = h === blocker.hour + OPENPLAY_HOURS - 1
-                    return (
-                      <div key={court} onClick={() => openDetail(blocker, 'booking')} style={{ background: '#0d1e35', border: '1px solid #1e4a8a', borderTop: 'none', borderRadius: isLast ? '0 0 5px 5px' : 0, borderBottom: isLast ? undefined : 'none', minHeight: 36, cursor: 'pointer' }} />
-                    )
-                  }
+                  const { item, kind, spanSlots } = occ
+                  const isOP    = kind === 'booking' && item.modality === 'openplay'
+                  const isTour  = kind === 'tour'
+                  const isDrill = kind === 'drill'
+                  const colors = isTour
+                    ? { bg: '#2e1a0d', border: '#8a4a1e', text: '#e8a87c' }
+                    : isDrill
+                    ? { bg: '#1e1535', border: '#6b3fa0', text: '#c8a8f0' }
+                    : isOP
+                    ? { bg: '#0d1e35', border: '#1e4a8a', text: '#7eb8f7' }
+                    : { bg: isPastSlot ? '#1e1e1e' : '#1a2e0d', border: isPastSlot ? '#2a2a2a' : 'var(--gd)', text: 'var(--g)' }
 
-                  if (isPastHour) {
-                    return <div key={court} style={{ background: '#1e1e1e', border: '1px solid #2a2a2a', borderRadius: 5, opacity: .4, minHeight: 36 }} />
+                  let icon = ''
+                  let line1 = item.name
+                  let line2 = ''
+                  if (isTour) { icon = '🏓 '; line2 = `${item.package} · ${item.hotel?.substring(0, 15) || ''}` }
+                  else if (isDrill) { icon = '🎯 '; line2 = item.type === 'private' ? 'Privado' : 'Colectivo' }
+                  else if (isOP) { icon = '👥 '; line2 = `${item.people}p · $${item.revenue} MXN` }
+                  else {
+                    const durLabel = spanSlots > 2 ? ` · ${spanSlots / 2}h` : ''
+                    line2 = `${item.people}p${item.city ? ` · ${item.city}` : ''}${durLabel}`
                   }
 
                   return (
-                    <div key={court}
-                      onClick={() => {
-                        setModal({ hour: h, court })
-                        setForm({ name:'', city:'', modality:'privada', people:2, gM:0, gF:0, gK:0, notes:'', startMin:0, endHour:h+1, endMin:0 })
-                        setError('')
-                      }}
-                      style={{ background: 'var(--sf)', border: '1px solid var(--br)', borderRadius: 5, minHeight: 36, cursor: 'pointer', transition: 'all .15s' }}
-                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--g)'; e.currentTarget.style.background = '#1e2a14' }}
-                      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--br)'; e.currentTarget.style.background = 'var(--sf)' }}
-                    />
+                    <div key={key}
+                      onClick={() => openDetail(item, kind)}
+                      style={{
+                        ...baseStyle,
+                        gridRow: `${occ.startSlot + 1} / span ${spanSlots}`,
+                        background: colors.bg, border: `1px solid ${colors.border}`,
+                        borderRadius: 5, padding: '4px 6px', overflow: 'hidden',
+                        position: 'relative', cursor: 'pointer',
+                        opacity: isPastSlot && kind === 'booking' && !isOP ? .6 : 1,
+                      }}>
+                      <div style={{ fontFamily: 'var(--font-cond)', fontSize: 13, fontWeight: 600, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {icon}{line1}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--mt)' }}>{line2}</div>
+                      {kind === 'booking' && !isPastSlot && (
+                        confirmDelete === item.id ? (
+                          <div style={{ position: 'absolute', top: 2, right: 2, display: 'flex', gap: 2, background: 'var(--cd)', borderRadius: 4, padding: 2, zIndex: 10 }}>
+                            <button onClick={e => { e.stopPropagation(); deleteBooking(item.id); setConfirmDelete(null) }}
+                              style={{ background: 'var(--rd)', border: 'none', borderRadius: 3, padding: '1px 5px', color: '#fff', fontSize: 9, cursor: 'pointer' }}>✓</button>
+                            <button onClick={e => { e.stopPropagation(); setConfirmDelete(null) }}
+                              style={{ background: '#444', border: 'none', borderRadius: 3, padding: '1px 5px', color: '#fff', fontSize: 9, cursor: 'pointer' }}>✗</button>
+                          </div>
+                        ) : (
+                          <button onClick={e => { e.stopPropagation(); setConfirmDelete(item.id) }}
+                            style={{ position: 'absolute', top: 3, right: 3, background: 'var(--rd)', border: 'none', borderRadius: 3, width: 14, height: 14, color: '#fff', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+                        )
+                      )}
+                    </div>
                   )
-                })}
+                }
 
-                {/* ── INLINE FORM — se despliega en la fila de la hora seleccionada ── */}
-                {isModalOpen && modal.court && visibleCourts.includes(modal.court) && (
-                  renderInlineForm(h, modal.court)
-                )}
-              </div>
-            </div>
-            <div style={{ height: 1, background: 'var(--br)', margin: '1px 0 1px 52px', opacity: .35 }} />
+                if (isPastSlot) {
+                  return <div key={key} style={{ ...baseStyle, gridRow: slotIdx + 1, background: '#1e1e1e', border: '1px solid #2a2a2a', borderRadius: isHourMark ? 5 : 0, opacity: .4 }} />
+                }
+
+                if (isModalOpen) {
+                  return (
+                    <div key={key} style={{ ...baseStyle, gridRow: `${slotIdx + 1} / span 1`, gridColumn: '2 / -1', zIndex: 50 }}>
+                      {renderInlineForm(slot.hour, court, slot.minute)}
+                    </div>
+                  )
+                }
+
+                return (
+                  <div key={key}
+                    onClick={() => {
+                      setModal({ hour: slot.hour, minute: slot.minute, court, slotIdx })
+                      setForm({ name:'', city:'', modality:'privada', people:2, gM:0, gF:0, gK:0, notes:'', startMin: slot.minute, endHour: slot.minute === 30 ? slot.hour + 1 : slot.hour, endMin: slot.minute === 30 ? 0 : 30 })
+                      setError('')
+                    }}
+                    style={{ ...baseStyle, gridRow: slotIdx + 1, background: 'var(--sf)', borderLeft: '1px solid var(--br)', borderRight: '1px solid var(--br)', borderBottom: slotIdx === SLOTS.length - 1 ? '1px solid var(--br)' : 'none', borderRadius: isHourMark ? '5px 5px 0 0' : 0, cursor: 'pointer', transition: 'background .15s' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#1e2a14' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--sf)' }}
+                  />
+                )
+              })
+            ))}
           </div>
         )
-      })}
+      })()}
 
       {/* DETAIL MODAL — tours, drills y privadas */}
       {detailModal && (
