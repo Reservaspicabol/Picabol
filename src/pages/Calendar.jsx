@@ -30,6 +30,10 @@ export default function Calendar() {
   const [error, setError] = useState('')
   const [notif, setNotif] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [promoCode, setPromoCode] = useState(null)
+  const [editingPromo, setEditingPromo] = useState(false)
+  const [promoInput, setPromoInput] = useState('')
+  const [savingPromo, setSavingPromo] = useState(false)
 
   const days = getWeekDays(weekOffset)
 
@@ -56,6 +60,41 @@ export default function Calendar() {
       .subscribe()
     return () => supabase.removeChannel(channel)
   }, [weekOffset])
+
+  useEffect(() => {
+    loadPromoCode()
+  }, [])
+
+  async function loadPromoCode() {
+    const { data } = await supabase.from('promo_codes').select('code').eq('active', true).limit(1)
+    setPromoCode(data && data.length ? data[0].code : null)
+  }
+
+  async function savePromoCode() {
+    const code = promoInput.trim()
+    if (!code) return
+    setSavingPromo(true)
+    // Desactiva codigos previos y crea/activa el nuevo (mantiene solo uno activo a la vez)
+    await supabase.from('promo_codes').update({ active: false }).eq('active', true)
+    const { error } = await supabase.from('promo_codes').insert({ code, active: true })
+    if (!error) {
+      setPromoCode(code)
+      setNotif(`✅ Código de promoción actualizado: ${code}`)
+      setEditingPromo(false)
+      setPromoInput('')
+    } else {
+      setError(error.message)
+    }
+    setSavingPromo(false)
+  }
+
+  async function disablePromoCode() {
+    setSavingPromo(true)
+    await supabase.from('promo_codes').update({ active: false }).eq('active', true)
+    setPromoCode(null)
+    setNotif('Código de promoción desactivado')
+    setSavingPromo(false)
+  }
 
   const tourBookingsNormalized = tourBookings.map(tb => ({
     ...tb, modality: 'tour', name: `🏓 Tour: ${tb.client_name}`, people: 1,
@@ -401,6 +440,30 @@ export default function Calendar() {
           <button className="btn btn-ghost btn-sm" onClick={() => { setWeekOffset(0); setSelectedDay(todayStr()) }}>Hoy</button>
         </div>
         <button className="btn btn-ghost btn-sm" onClick={() => setWeekOffset(w => w + 1)}>→</button>
+      </div>
+
+      {/* Codigo de promocion — Open Play (solo crear sala, sitio web) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, background: 'var(--sf)', border: '1px solid var(--br)', borderRadius: 8, padding: '8px 12px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: 'var(--mt)', letterSpacing: '.05em', fontFamily: 'var(--font-cond)' }}>🎁 PROMO OPEN PLAY:</span>
+        {!editingPromo ? (
+          <>
+            {promoCode ? (
+              <span style={{ fontFamily: 'var(--font-cond)', fontSize: 15, fontWeight: 700, color: 'var(--am)', background: '#3a2e0d', padding: '2px 10px', borderRadius: 5 }}>{promoCode}</span>
+            ) : (
+              <span style={{ fontSize: 12, color: 'var(--mt)', fontStyle: 'italic' }}>Sin código activo</span>
+            )}
+            <button className="btn btn-ghost btn-sm" onClick={() => { setEditingPromo(true); setPromoInput(promoCode || '') }}>✏️ {promoCode ? 'Cambiar' : 'Crear'}</button>
+            {promoCode && (
+              <button className="btn btn-ghost btn-sm" onClick={disablePromoCode} disabled={savingPromo} style={{ color: 'var(--rd)', borderColor: 'var(--rd)' }}>Desactivar</button>
+            )}
+          </>
+        ) : (
+          <>
+            <input className="form-input" style={{ width: 160, padding: '4px 8px', fontSize: 13 }} value={promoInput} onChange={e => setPromoInput(e.target.value)} placeholder="Ej: VERANO2026" autoFocus />
+            <button className="btn btn-green btn-sm" onClick={savePromoCode} disabled={savingPromo || !promoInput.trim()}>{savingPromo ? 'Guardando...' : 'Guardar'}</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setEditingPromo(false); setPromoInput('') }}>Cancelar</button>
+          </>
+        )}
       </div>
 
       {/* Day tabs */}
